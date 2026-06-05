@@ -88,7 +88,8 @@ BF.core = BF.core || {};
       const t = rng();
       const type = t < 0.48 ? 'chance' : (t < 0.75 ? 'save' : (t < 0.9 ? 'card' : 'injury'));
       const tm = side === 'home' ? home : away;
-      events.push({ minute: m, type: type, side: side, player: scorer(tm).name });
+      const p = scorer(tm);
+      events.push({ minute: m, type: type, side: side, player: p ? p.name : '', playerId: p ? p.id : 0 });
     }
     events.sort(function (a, b) { return a.minute - b.minute; });
 

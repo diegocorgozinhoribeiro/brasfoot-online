@@ -56,6 +56,28 @@ BF.core = BF.core || {};
     };
   };
 
+  function updatePlayerStatsFromMatch(S, res, homeId, awayId, rng) {
+    function touch(pid, fn) {
+      const p = S.players.find(function (x) { return x.id === pid; });
+      if (p) fn(p);
+    }
+    C.lineupOf(S, homeId).concat(C.lineupOf(S, awayId)).forEach(function (p) {
+      p.energy = Math.max(45, Math.round(((p.energy == null ? 100 : p.energy) - C.rint(rng, 4, 12))));
+      p.rating = Math.round((((p.rating || p.ovr / 13) * 0.92) + ((p.ovr / 13) + rng() * 0.7) * 0.08) * 100) / 100;
+    });
+    (res.events || []).forEach(function (ev) {
+      if (ev.type === 'card' && ev.playerId) touch(ev.playerId, function (p) { p.cards = (p.cards || 0) + 1; });
+    });
+    res.scorers.home.concat(res.scorers.away).forEach(function (pid) {
+      const teamId = res.scorers.home.indexOf(pid) >= 0 ? homeId : awayId;
+      const mates = C.lineupOf(S, teamId).filter(function (p) { return p.id !== pid && p.pos !== 'GOL'; });
+      if (mates.length && rng() < 0.72) {
+        const a = mates[Math.floor(rng() * mates.length)];
+        a.assists = (a.assists || 0) + 1;
+      }
+    });
+  }
+
   // ---- Diretoria / metas ----
   C.BOARD_TEXT = {
     title:      'Ser campeão da Série A',
@@ -142,6 +164,7 @@ BF.core = BF.core || {};
       const home = C.teamObj(S, f.homeId), away = C.teamObj(S, f.awayId);
       const res = C.simulateMatch(home, away, rng);
       f.hg = res.hg; f.ag = res.ag; f.played = true; f.upset = res.upset;
+      updatePlayerStatsFromMatch(S, res, f.homeId, f.awayId, rng);
       res.scorers.home.concat(res.scorers.away).forEach(function (pid) {
         const p = S.players.find(function (x) { return x.id === pid; }); if (p) p.goals++;
       });
@@ -257,6 +280,7 @@ BF.core = BF.core || {};
       case 'EXTEND_CONTRACT': C.extendContract(S, a); break;
       case 'OFFER_CREATE': C.createOffer(S, a); break;
       case 'OFFER_RESPOND': C.respondOffer(S, a); break;
+      case 'NEG_ARCHIVE': C.archiveNegotiation(S, a); break;
       default: break;
     }
     return S;

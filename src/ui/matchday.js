@@ -10,6 +10,8 @@ BF.ui.playMatch = function (match, S, onDone) {
   const events = match.events.slice();
   let hg = 0, ag = 0, minute = 0, idx = 0, timer = null;
   let paused = false, halfPaused = false;
+  let liveClubId = BF.me.clubId && (BF.me.clubId === match.homeId || BF.me.clubId === match.awayId) ? BF.me.clubId : match.homeId;
+  let liveLineup = C.lineupOf(S, liveClubId).map(function (p) { return p.id; });
 
   function commentary(ev) {
     const club = ev.side === 'home' ? home : away;
@@ -42,6 +44,7 @@ BF.ui.playMatch = function (match, S, onDone) {
         '<span class="md-clock" id="mdClock">0\'</span>' +
         '<span>' + away.name + '</span></div>' +
       matchStats() +
+      '<div id="mdPitch">' + U.tacticalPitch(S, liveClubId, { lineup: liveLineup.map(function (id) { return S.players.find(function (p) { return p.id === id; }); }), compact: true }) + '</div>' +
       '<div class="md-bar"><i id="mdBar"></i></div>' +
       '<div class="md-feed" id="mdFeed"></div>' +
       '<div class="md-actions"><button class="btn" id="mdPause">Pausar/Substituir</button><button class="btn" id="mdSkip">Pular para o fim</button>' +
@@ -84,6 +87,7 @@ BF.ui.playMatch = function (match, S, onDone) {
     const starters = ids.map(function (id) { return sq.find(function (p) { return p.id === id; }); }).filter(Boolean);
     const bench = sq.filter(function (p) { return ids.indexOf(p.id) < 0; }).sort(function (a, b) { return b.ovr - a.ovr; });
     const box = modal('<h1>' + title + '</h1><p class="sub">Escolha uma troca para salvar a escalação usada nas próximas partidas.</p>' +
+      U.tacticalPitch(S, clubId, { lineup: starters, compact: true }) +
       '<label class="fld">Sai<select id="subOut">' + starters.map(function (p) { return '<option value="' + p.id + '">' + U.esc(p.name) + ' (' + p.pos + ' ' + p.ovr + ')</option>'; }).join('') + '</select></label>' +
       '<label class="fld">Entra<select id="subIn">' + bench.map(function (p) { return '<option value="' + p.id + '">' + U.esc(p.name) + ' (' + p.pos + ' ' + p.ovr + ')</option>'; }).join('') + '</select></label>' +
       '<div class="md-actions"><button class="btn" id="subCancel">Voltar</button><button class="btn primary" id="subSave">Confirmar</button></div>');
@@ -91,7 +95,11 @@ BF.ui.playMatch = function (match, S, onDone) {
     box.querySelector('#subSave').onclick = function () {
       const outId = +box.querySelector('#subOut').value, inId = +box.querySelector('#subIn').value;
       const next = ids.map(function (id) { return id === outId ? inId : id; });
+      liveClubId = clubId;
+      liveLineup = next.slice();
       BF.dispatch({ type: 'SET_LINEUP', clubId: clubId, lineup: next });
+      const pitch = ov.querySelector('#mdPitch');
+      if (pitch) pitch.innerHTML = U.tacticalPitch(S, clubId, { lineup: liveLineup.map(function (id) { return S.players.find(function (p) { return p.id === id; }); }), compact: true });
       document.body.removeChild(box);
       line('<b>Substituição preparada.</b> A nova escalação foi salva para os próximos jogos.', 'md-sub');
       paused = false; startTimer();

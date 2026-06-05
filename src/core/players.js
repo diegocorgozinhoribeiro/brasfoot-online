@@ -21,7 +21,12 @@ BF.core = BF.core || {};
         const salary = Math.round((value * 0.018 + 0.04) * 1000) / 1000;     // milhoes/mes
         const name = real[pos] && real[pos].length ? real[pos].shift() : BF.core.rpick(rng, D.FIRST) + " " + BF.core.rpick(rng, D.LAST);
         const contract = BF.core.rint(rng, 6, 48);
-        list.push({ id: idRef.v++, clubId: club.id, name: name, pos: pos, ovr: ovr, age: age, value: value, salary: salary, contract: contract, listed: false, goals: 0 });
+        list.push({
+          id: idRef.v++, clubId: club.id, name: name, pos: pos, ovr: ovr, age: age,
+          value: value, salary: salary, contract: contract, listed: false, goals: 0,
+          assists: 0, cards: 0, energy: 100, foot: rng() < 0.24 ? 'E' : 'D',
+          no: BF.core.rint(rng, 1, 40), rating: Math.round(((ovr / 13) + rng() * 0.55) * 100) / 100
+        });
       }
     });
     return list;

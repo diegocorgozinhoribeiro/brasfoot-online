@@ -94,6 +94,14 @@ BF.core = BF.core || {};
     }
   };
 
+  C.archiveNegotiation = function (S, a) {
+    const neg = S.negotiations.find(function (n) { return n.id === a.negId; });
+    if (!neg) return;
+    if (['accepted', 'rejected', 'withdrawn'].indexOf(neg.status) < 0) return;
+    neg.archived = true;
+    neg.history.push({ by: 'Sistema', action: 'Negociacao encerrada pelo usuario' });
+  };
+
   C.toggleTransferList = function (S, a) {
     const p = S.players.find(function (x) { return x.id === a.playerId && x.clubId === a.clubId; });
     if (!p) return;
