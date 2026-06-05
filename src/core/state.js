@@ -202,7 +202,7 @@ BF.core = BF.core || {};
     const S = {
       seed: seed, season: 1, year: 2026, round: 1, totalRounds: 1,
       clubs: clubs, players: players, fixtures: [],
-      history: [], controlled: {}, negotiations: [], lastRound: null, feed: [], negId: 1,
+      history: [], controlled: {}, userClubs: {}, negotiations: [], lastRound: null, feed: [], negId: 1,
       lineups: {}, tactics: {}, formations: {}, boards: {}, fired: {}, votes: {},
       signings: {}, cups: {}, cupSlots: null, nextCupSlots: null
     };
@@ -366,8 +366,35 @@ BF.core = BF.core || {};
         break;
       case 'PLAY_ALL': while (S.round <= S.totalRounds) C.playRound(S); break;
       case 'NEXT_SEASON': C.nextSeason(S); break;
-      case 'CLAIM_CLUB': S.controlled[a.clubId] = a.name; delete S.fired[a.clubId]; C.assignBoard(S, a.clubId); break;
-      case 'RELEASE_CLUB': delete S.controlled[a.clubId]; delete S.boards[a.clubId]; delete S.fired[a.clubId]; break;
+      case 'CLAIM_CLUB': {
+        S.controlled[a.clubId] = a.name;
+        S.userClubs = S.userClubs || {};
+        if (a.userId) {
+          // remove qualquer vinculo anterior deste usuario
+          Object.keys(S.userClubs).forEach(function (uid) {
+            if (uid === String(a.userId)) delete S.userClubs[uid];
+          });
+          // e remove qualquer outro usuario vinculado a este clube
+          Object.keys(S.userClubs).forEach(function (uid) {
+            if (+S.userClubs[uid] === +a.clubId) delete S.userClubs[uid];
+          });
+          S.userClubs[String(a.userId)] = a.clubId;
+        }
+        delete S.fired[a.clubId];
+        C.assignBoard(S, a.clubId);
+        break;
+      }
+      case 'RELEASE_CLUB': {
+        delete S.controlled[a.clubId];
+        delete S.boards[a.clubId];
+        delete S.fired[a.clubId];
+        if (S.userClubs) {
+          Object.keys(S.userClubs).forEach(function (uid) {
+            if (+S.userClubs[uid] === +a.clubId) delete S.userClubs[uid];
+          });
+        }
+        break;
+      }
       case 'SET_LINEUP': S.lineups[a.clubId] = (a.lineup || []).slice(0, 11); break;
       case 'SET_TACTIC': S.tactics[a.clubId] = a.tactic; break;
       case 'SET_FORMATION': S.formations[a.clubId] = a.formation; break;

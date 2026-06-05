@@ -108,10 +108,36 @@ window.BF = window.BF || {};
 
   BF.claimClub = function (clubId) {
     BF.me.clubId = clubId;
-    if (BF.G.transport && BF.G.transport.role !== 'solo') BF.G.transport.claimClub(clubId, BF.me.name);
-    else BF.dispatch({ type: 'CLAIM_CLUB', clubId: clubId, name: BF.me.name });
+    const uid = (BF.api && BF.api.getUser() && BF.api.getUser().id) || null;
+    if (BF.G.transport && BF.G.transport.role === 'guest') {
+      // guest envia claim via servidor (servidor preenche userId/name autenticados)
+      BF.G.transport.claimClub(clubId, BF.me.name);
+    } else {
+      BF.dispatch({ type: 'CLAIM_CLUB', clubId: clubId, name: BF.me.name, userId: uid });
+    }
     persist(); U.render();
   };
+
+  // Re-vincula BF.me.clubId ao clube salvo do usuário quando um estado chega do servidor.
+  // Usa S.userClubs[userId] (preferencial) com fallback em S.controlled por nome.
+  function rebindMyClub(S) {
+    if (!S) return;
+    const u = BF.api && BF.api.getUser(); if (!u) return;
+    if (BF.me.clubId && S.controlled && S.controlled[BF.me.clubId]) return; // j\u00e1 vinculado e v\u00e1lido
+    let cid = null;
+    if (S.userClubs && u.id != null && S.userClubs[String(u.id)] != null) {
+      cid = +S.userClubs[String(u.id)];
+    }
+    if (cid == null && S.controlled && u.name) {
+      // fallback: procura pelo nome (jogos antigos sem userClubs)
+      Object.keys(S.controlled).forEach(function (k) {
+        if (cid == null && S.controlled[k] === u.name) cid = +k;
+      });
+    }
+    if (cid != null && S.controlled && S.controlled[cid]) {
+      BF.me.clubId = cid;
+    }
+  }
 
   function maybeWatch() {
     const S = BF.G.S; if (!S || !S.lastRound) return;
@@ -128,9 +154,10 @@ window.BF = window.BF || {};
     t.on('welcome', function (m) {
       BF.G.partyCode = m.code;
       if (m.members) BF.G.members = m.members;
+      if (m.state) { BF.G.S = m.state; rebindMyClub(m.state); }
       U.render();
     });
-    t.on('state', function (S) { BF.G.S = S; persist(); U.render(); maybeWatch(); });
+    t.on('state', function (S) { BF.G.S = S; rebindMyClub(S); persist(); U.render(); maybeWatch(); });
     t.on('presence', function (members) { BF.G.members = members; U.render(); });
     t.on('members',  function (members) { BF.G.members = members; U.render(); });
     t.on('peer-join',  function (p) { if (BF.G.transport && BF.G.transport.role === 'host') BF.G.transport.broadcastState(BF.G.S); U.flash((p && p.name ? p.name : 'Jogador') + ' entrou na party'); });
