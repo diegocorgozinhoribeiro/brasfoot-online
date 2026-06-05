@@ -182,9 +182,6 @@ window.BF = window.BF || {};
 
   // -------- telas de inicio --------
   function showSetup() {
-    const sv = loadSave();
-    document.getElementById('continueWrap').style.display = sv && sv.S ? 'block' : 'none';
-
     // seletor de clube (modo solo) - com divisao
     const pick = document.getElementById('soloClubs');
     let chosen = null;
@@ -314,8 +311,11 @@ window.BF = window.BF || {};
   };
 
   document.addEventListener('DOMContentLoaded', function () {
-    // Bootstrap UI do setup (clubes solo + tabs) e auth
-    showSetup();
-    BF.authUI && BF.authUI.bootstrap && BF.authUI.bootstrap();
+    // Auth primeiro — a tela de login é a primeira a aparecer e deve funcionar
+    // mesmo que algo no showSetup quebre.
+    try { BF.authUI && BF.authUI.bootstrap && BF.authUI.bootstrap(); }
+    catch (e) { console.error('[bf] auth bootstrap error:', e); }
+    try { showSetup(); }
+    catch (e) { console.error('[bf] showSetup error:', e); }
   });
 })();
