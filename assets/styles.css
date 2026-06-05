@@ -341,3 +341,66 @@ tr.zone-promo td:first-child{ box-shadow: inset 3px 0 0 var(--gold); }
 .group-card td.nm{ text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px; }
 .group-card tr.q-adv td{ color:var(--green); font-weight:700; }
 .group-card tr.me td{ background:rgba(34,197,94,.12); }
+
+/* ===================== AUTH + MEUS JOGOS (v10) ===================== */
+.hidden{ display:none !important; }
+#auth{ min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 16px; }
+.auth-box{ max-width:440px; width:100%; }
+.auth-title{ margin:4px 0 12px; font-size:18px; opacity:.9; }
+.auth-box .fld{ display:flex; flex-direction:column; gap:6px; margin:8px 0; font-size:13px; opacity:.9; }
+.auth-box .fld input{
+  padding:10px 12px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+  border-radius:8px; color:inherit; font:inherit; outline:none; transition:border .15s;
+}
+.auth-box .fld input:focus{ border-color:#22c55e; }
+.auth-box .btn.primary{ width:100%; margin-top:10px; }
+.btn.ghost.link{ background:transparent; border:none; color:#22c55e; text-decoration:underline; padding:8px; margin-top:6px; }
+.btn.ghost.link:hover{ color:#4ade80; }
+.tiny{ font-size:11px; opacity:.6; margin-top:14px; line-height:1.5; }
+.tiny code{ background:rgba(255,255,255,.08); padding:2px 5px; border-radius:4px; font-size:10px; }
+
+.setup-right{ margin-left:auto; display:flex; align-items:center; gap:10px; }
+.user-chip{
+  display:inline-block; padding:5px 10px; border-radius:999px;
+  background:rgba(34,197,94,.15); border:1px solid rgba(34,197,94,.35);
+  color:#86efac; font-size:12px; font-weight:600;
+}
+.btn.sm{ padding:5px 11px; font-size:12px; }
+.btn.ghost{ background:transparent; border:1px solid rgba(255,255,255,.18); }
+.btn.ghost:hover{ background:rgba(255,255,255,.06); }
+.btn.ghost.danger{ color:#fca5a5; border-color:rgba(239,68,68,.4); }
+.btn.ghost.danger:hover{ background:rgba(239,68,68,.12); }
+
+.panel-head{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+
+.games-list{ display:flex; flex-direction:column; gap:10px; max-height:55vh; overflow:auto; padding-right:2px; }
+.game-card{
+  background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1);
+  border-radius:10px; padding:12px 14px;
+}
+.game-card .gc-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+.game-card .gc-code{ font-family:ui-monospace, monospace; font-weight:700; font-size:14px; letter-spacing:.5px; }
+.game-card .gc-body{ display:flex; justify-content:space-between; gap:12px; font-size:12px; opacity:.85; margin-bottom:10px; flex-wrap:wrap; }
+.game-card .gc-info{ font-weight:500; }
+.game-card .gc-date{ opacity:.65; }
+.game-card .gc-actions{ display:flex; gap:8px; }
+.game-card .btn{ padding:6px 12px; font-size:12px; }
+
+.dot{ display:inline-block; width:9px; height:9px; border-radius:50%; }
+.dot.on{ background:#22c55e; box-shadow:0 0 6px #22c55e; }
+.dot.off{ background:#71717a; }
+
+.tag{
+  display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px;
+  background:rgba(59,130,246,.15); color:#93c5fd; border:1px solid rgba(59,130,246,.3);
+  font-weight:600; text-transform:uppercase; letter-spacing:.4px;
+}
+.tag.alt{ background:rgba(168,85,247,.15); color:#d8b4fe; border-color:rgba(168,85,247,.3); }
+.tag.warn{ background:rgba(234,179,8,.15); color:#fde047; border-color:rgba(234,179,8,.3); }
+
+.flash.err{ background:#ef4444; }
+
+@media (max-width:600px){
+  .game-card .gc-body{ flex-direction:column; gap:4px; }
+  .setup-right{ width:100%; justify-content:flex-end; margin-top:8px; }
+}

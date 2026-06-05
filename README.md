@@ -30,7 +30,9 @@ Depois abra http://localhost:8000.
 
 ## 2. Hospedar online (sem build, sem backend)
 
-O jogo eh 100% estatico: HTML + CSS + JS puro. **Nao tem build, nao tem servidor, nao tem banco.** Todo o estado mora no `localStorage` do navegador de cada jogador. Por isso voce pode subir a pasta inteira em qualquer host estatico e funciona na hora.
+O front-end eh estatico (HTML + CSS + JS puro, sem build). A partir da v10 o jogo exige um **servidor relay com banco de dados** para login e saves na nuvem. O front-end fica em qualquer host estatico (Vercel, Netlify, GitHub Pages); o servidor fica no Render/Railway/Fly.io; o banco fica no Neon (Postgres gratuito).
+
+> **Importante:** dar F5 nao perde mais o save. O estado do jogo eh gravado no banco a cada jogada relevante (debounce 3s) e voce continua de onde parou ao reabrir.
 
 ### Opcao 1 - Vercel (mais rapido, 1 minuto)
 
@@ -79,7 +81,27 @@ Faca upload da pasta inteira via FTP/SFTP/painel para a `public_html` (ou equiva
 
 ---
 
-## 3. Multiplayer real entre dispositivos (WebSocket relay)
+## 3. Login + saves na nuvem (obrigatorio na v10)
+
+1. **Hospede o relay** seguindo `server/README.md`:
+   - Crie um Postgres gratis no [Neon](https://neon.tech) e copie a `DATABASE_URL`.
+   - Gere um `JWT_SECRET` com `openssl rand -hex 32`.
+   - No Render, adicione as duas variaveis em **Settings > Environment** e faca redeploy. O schema (`users`, `games`) eh criado sozinho no primeiro boot.
+2. **Abra o site** (Vercel). A primeira tela eh de login.
+   - Preencha **Servidor relay** = `wss://seu-servico.onrender.com`.
+   - Clique em **Cadastrar** (e-mail + nome + senha >= 6 chars) ou em **Entrar**.
+3. Apos o login, voce ve a aba **Meus jogos** com tudo que voce hospedou ou participou.
+   - Clique em **Continuar** para retomar. Se for party e o anfitriao estiver offline, o botao aparece desabilitado com o aviso "Anfitriao offline".
+   - **Excluir** so aparece para o anfitriao.
+4. Comece um novo jogo em **Individual** ou **Criar party**. O codigo da party (ex.: `BR-7K2D9`) eh compartilhado com os amigos, que precisam apenas: criar conta no mesmo relay, ir em **Entrar na party** e colar o codigo.
+
+### Regras de lobby
+
+- O servidor recusa convidados se o anfitriao nao estiver conectado naquele momento (mensagem: "O anfitriao esta offline. Peca para ele entrar primeiro.").
+- Se o anfitriao cai no meio da partida, os convidados recebem `host-left` e sao desconectados; podem reentrar quando o anfitriao voltar online.
+- Token JWT vale 30 dias. Apos expirar, voce volta automaticamente para a tela de login.
+
+## 4. Multiplayer real entre dispositivos (WebSocket relay)
 
 O jogo agora suporta **multiplayer real entre dispositivos pela internet** atraves de um servidor WebSocket de relay (em `server/`). O servidor nao executa logica do jogo, apenas retransmite mensagens entre os jogadores de uma sala. O **host (anfitriao) continua sendo a autoridade** do estado.
 

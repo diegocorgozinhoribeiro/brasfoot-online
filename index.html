@@ -9,20 +9,48 @@
 </head>
 <body>
 
-<!-- ===================== TELA DE INICIO ===================== -->
-<div id="setup">
-  <div class="setup-box">
-    <div class="logo"><span class="ball">⚽</span><div><h1>Brasfoot <span>Manager</span></h1><p>Simulador de carreira como técnico de clube</p></div></div>
+<!-- ===================== TELA DE LOGIN ===================== -->
+<div id="auth">
+  <div class="setup-box auth-box">
+    <div class="logo"><span class="ball">⚽</span><div><h1>Brasfoot <span>Manager</span></h1><p>Entre com sua conta para salvar progresso na nuvem</p></div></div>
+    <h2 id="authTitle" class="auth-title">Entrar</h2>
+    <label class="fld">E-mail<input type="email" id="authEmail" autocomplete="username" placeholder="voce@exemplo.com"></label>
+    <label class="fld">Senha<input type="password" id="authPass" autocomplete="current-password" placeholder="mínimo 6 caracteres"></label>
+    <label class="fld" id="authNameWrap" style="display:none">Nome<input id="authName" maxlength="40" placeholder="Como te chamamos"></label>
+    <label class="fld">Servidor relay<input id="authServer" placeholder="wss://brasfoot-online.onrender.com" maxlength="200"></label>
+    <button class="btn primary big" id="authSubmit">Entrar</button>
+    <button class="btn ghost link" id="authToggle">Ainda não tem conta? Cadastrar</button>
+    <p class="tiny">A senha é armazenada com hash scrypt. O servidor é o relay que você hospedou (veja <code>server/README.md</code>).</p>
+  </div>
+  <div class="setup-foot">Inspirado no clássico Brasfoot • projeto educativo, sem afiliação oficial</div>
+</div>
 
-    <div id="continueWrap" style="display:none">
-      <button class="btn primary big" id="continueBtn">▶ Continuar jogo salvo</button>
-      <div class="or">ou comece um novo</div>
+<!-- ===================== TELA DE INICIO ===================== -->
+<div id="setup" class="hidden">
+  <div class="setup-box">
+    <div class="logo">
+      <span class="ball">⚽</span>
+      <div><h1>Brasfoot <span>Manager</span></h1><p>Simulador de carreira como técnico de clube</p></div>
+      <div class="setup-right">
+        <span id="userChip" class="user-chip hidden"></span>
+        <button class="btn ghost sm" id="logoutBtn">Sair</button>
+      </div>
     </div>
 
     <div class="mode-tabs">
+      <button class="mode-tab" data-mode="mine">Meus jogos</button>
       <button class="mode-tab active" data-mode="solo">Individual</button>
       <button class="mode-tab" data-mode="host">Criar party</button>
       <button class="mode-tab" data-mode="join">Entrar na party</button>
+    </div>
+
+    <!-- MEUS JOGOS -->
+    <div class="mode-panel hidden" data-panel="mine">
+      <div class="panel-head">
+        <p class="panel-hint">Continue de onde parou. Jogos solo são seus; em party, você só entra se o anfitrião estiver online.</p>
+        <button class="btn sm ghost" id="refreshGamesBtn">Atualizar</button>
+      </div>
+      <div id="myGamesList" class="games-list"></div>
     </div>
 
     <!-- SOLO -->
@@ -35,21 +63,17 @@
 
     <!-- CRIAR PARTY -->
     <div class="mode-panel hidden" data-panel="host">
-      <p class="panel-hint">Crie uma sala, compartilhe o código e cada amigo assume um time.</p>
-      <label class="fld">Seu nome<input id="hostName" placeholder="Ex.: Diego" maxlength="16"></label>
-      <label class="fld">Servidor relay (opcional)<input id="hostServer" placeholder="wss://meu-relay.onrender.com" maxlength="200"></label>
+      <p class="panel-hint">Crie uma sala, compartilhe o código e cada amigo assume um time. Seu nome vem do login.</p>
       <button class="btn primary big" id="hostStart">Criar party</button>
-      <p class="tiny">Com servidor relay: multiplayer real entre dispositivos pela internet. Sem servidor: party local entre abas do mesmo navegador (modo offline). Veja <code>server/README.md</code> para hospedar o relay grátis em Render/Railway/Fly.io.</p>
+      <p class="tiny">A party fica salva na sua conta. Você pode fechar o navegador e continuar amanhã — os convidados só entram quando você estiver online.</p>
     </div>
 
     <!-- ENTRAR PARTY -->
     <div class="mode-panel hidden" data-panel="join">
-      <p class="panel-hint">Entre com o código que o anfitrião compartilhou.</p>
-      <label class="fld">Seu nome<input id="joinName" placeholder="Ex.: Ana" maxlength="16"></label>
+      <p class="panel-hint">Entre com o código que o anfitrião compartilhou. Seu nome vem do login.</p>
       <label class="fld">Código da party<input id="joinCode" placeholder="BR-XXXXX" maxlength="10"></label>
-      <label class="fld">Servidor relay (opcional)<input id="joinServer" placeholder="wss://meu-relay.onrender.com" maxlength="200"></label>
       <button class="btn primary big" id="joinStart">Entrar</button>
-      <p class="tiny">Use o mesmo servidor relay que o anfitrião informou. Deixe em branco se vocês estão no mesmo navegador.</p>
+      <p class="tiny">Se o anfitrião não estiver online, o servidor recusa a entrada com aviso amigável.</p>
     </div>
   </div>
   <div class="setup-foot">Inspirado no clássico Brasfoot • projeto educativo, sem afiliação oficial</div>
@@ -96,9 +120,11 @@
 <script src="src/net/localTransport.js"></script>
 <script src="src/net/partyTransport.js"></script>
 <script src="src/net/wsPartyTransport.js"></script>
+<script src="src/net/apiClient.js"></script>
 <script src="src/ui/components.js"></script>
 <script src="src/ui/matchday.js"></script>
 <script src="src/ui/app.js"></script>
+<script src="src/ui/auth.js"></script>
 <script src="src/main.js"></script>
 </body>
 </html>

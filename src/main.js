@@ -125,13 +125,52 @@ window.BF = window.BF || {};
   function wire(t) {
     BF.G.transport = t;
     t.on('ready', function () {});
-    t.on('state', function (S) { BF.G.S = S; U.render(); maybeWatch(); });
+    t.on('welcome', function (m) {
+      BF.G.partyCode = m.code;
+      if (m.members) BF.G.members = m.members;
+      U.render();
+    });
+    t.on('state', function (S) { BF.G.S = S; persist(); U.render(); maybeWatch(); });
     t.on('presence', function (members) { BF.G.members = members; U.render(); });
+    t.on('members',  function (members) { BF.G.members = members; U.render(); });
+    t.on('peer-join',  function (p) { if (BF.G.transport && BF.G.transport.role === 'host') BF.G.transport.broadcastState(BF.G.S); U.flash((p && p.name ? p.name : 'Jogador') + ' entrou na party'); });
+    t.on('peer-leave', function (p) { U.flash((p && p.name ? p.name : 'Jogador') + ' saiu', true); });
     t.on('requestSync', function () { if (BF.G.transport.role === 'host') BF.G.transport.broadcastState(BF.G.S); });
     t.on('action', function (action) { // host recebe acao de um guest
       BF.G.S = C.applyAction(BF.G.S, action); persist(); BF.G.transport.broadcastState(BF.G.S); U.render(); maybeWatch();
     });
-    t.on('error', function (msg) { U.flash(msg, true); });
+    t.on('status', function (st) { /* connected | disconnected */ });
+    t.on('error', function (e) {
+      const msg = (e && e.msg) ? e.msg : String(e || 'Erro de conex\u00e3o');
+      U.flash(msg, true);
+      if (e && e.fatal) {
+        try { if (BF.G.transport) BF.G.transport.close(); } catch (_) {}
+        BF.G.transport = null;
+        BF.G.S = null;
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('setup').classList.remove('hidden');
+        if (/sess\u00e3o inv|sess\u00e3o\sexpir|n\u00e3o autenticado/i.test(msg)) {
+          BF.api && BF.api.logout && BF.api.logout();
+          BF.authUI && BF.authUI.show && BF.authUI.show();
+        } else if (BF.authUI && BF.authUI.refreshGames) {
+          BF.authUI.refreshGames();
+        }
+      }
+    });
+    t.on('fatal', function () { /* j\u00e1 tratado em error/fatal */ });
+  }
+
+  // ws transport helper (sempre online)
+  function makeWs(opts) {
+    return new BF.net.WsPartyTransport({
+      code: opts.code,
+      name: BF.me.name,
+      host: !!opts.host,
+      mode: opts.mode || 'party',
+      serverUrl: (BF.api && BF.api.getBase()) || '',
+      token: BF.api && BF.api.getToken(),
+      initialState: opts.initialState || null,
+    });
   }
 
   function enterApp() {
@@ -180,73 +219,103 @@ window.BF = window.BF || {};
       };
     });
 
-    // SOLO
+    // SOLO -- agora cria jogo online (host com mode='solo') para salvar na nuvem
     document.getElementById('soloStart').onclick = function () {
       if (!chosen) return;
-      BF.me = { clubId: chosen, name: 'Você' };
-      BF.G.S = C.buildWorld('solo-' + Date.now());
-      BF.G.S = C.applyAction(BF.G.S, { type: 'CLAIM_CLUB', clubId: chosen, name: 'Você' });
-      wire(BF.net.makeTransport('local', {}));
-      BF.G.transport.start();
-      persist(); enterApp();
-    };
-
-    // CONTINUAR
-    document.getElementById('continueBtn').onclick = function () {
-      const sv = loadSave(); if (!sv || !sv.S) { U.flash('Nenhum jogo salvo', true); return; }
-      BF.G.S = sv.S; BF.me = sv.me || BF.me;
-      wire(BF.net.makeTransport('local', {}));
+      const u = BF.api && BF.api.getUser(); if (!u) { BF.authUI.show(); return; }
+      BF.me = { clubId: chosen, name: u.name };
+      const code = 'SOLO-' + (u.id || 'X') + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+      let S0 = C.buildWorld(code);
+      S0 = C.applyAction(S0, { type: 'CLAIM_CLUB', clubId: chosen, name: u.name });
+      BF.G.S = S0;
+      BF.G.partyCode = code;
+      wire(makeWs({ code: code, host: true, mode: 'solo', initialState: S0 }));
       BF.G.transport.start();
       enterApp();
     };
 
-    // CRIAR PARTY
+    // CRIAR PARTY -- agora persiste na nuvem
     document.getElementById('hostStart').onclick = function () {
-      const name = (document.getElementById('hostName').value || '').trim() || 'Anfitrião';
-      const serverEl = document.getElementById('hostServer');
-      const serverUrl = serverEl ? (serverEl.value || '').trim() : '';
+      const u = BF.api && BF.api.getUser(); if (!u) { BF.authUI.show(); return; }
       const code = C.partyCode();
-      BF.me = { clubId: null, name: name };
+      BF.me = { clubId: null, name: u.name };
+      const S0 = C.buildWorld(code);
+      BF.G.S = S0;
       BF.G.partyCode = code;
-      BF.G.S = C.buildWorld(code); // mundo deterministico a partir do codigo
-      // Lembra a URL do servidor para a proxima sessao
-      try { if (serverUrl) localStorage.setItem('bf_relay_url', serverUrl); } catch (e) {}
-      wire(BF.net.makeTransport(serverUrl ? 'ws' : 'party', { code: code, name: name, host: true, serverUrl: serverUrl }));
+      wire(makeWs({ code: code, host: true, mode: 'party', initialState: S0 }));
       BF.G.transport.start();
-      persist(); enterApp(); U.setTab('party');
-      if (serverUrl) U.flash('Sala online criada. Compartilhe o c\u00f3digo: ' + code);
+      enterApp(); U.setTab('party');
+      U.flash('Party criada. Compartilhe o c\u00f3digo: ' + code);
     };
 
-    // ENTRAR PARTY
+    // ENTRAR PARTY -- conecta como guest; servidor exige host online
     document.getElementById('joinStart').onclick = function () {
-      const name = (document.getElementById('joinName').value || '').trim();
+      const u = BF.api && BF.api.getUser(); if (!u) { BF.authUI.show(); return; }
       const code = (document.getElementById('joinCode').value || '').trim().toUpperCase();
-      const serverEl = document.getElementById('joinServer');
-      const serverUrl = serverEl ? (serverEl.value || '').trim() : '';
-      if (!name || !code) { U.flash('Preencha nome e c\u00f3digo', true); return; }
-      BF.me = { clubId: null, name: name };
+      if (!code) { U.flash('Informe o c\u00f3digo da party', true); return; }
+      BF.me = { clubId: null, name: u.name };
+      BF.G.S = C.buildWorld(code); // estado provis\u00f3rio at\u00e9 o host sincronizar
       BF.G.partyCode = code;
-      BF.G.S = C.buildWorld(code); // estado provisorio ate o host sincronizar
-      try { if (serverUrl) localStorage.setItem('bf_relay_url', serverUrl); } catch (e) {}
-      wire(BF.net.makeTransport(serverUrl ? 'ws' : 'party', { code: code, name: name, host: false, serverUrl: serverUrl }));
+      wire(makeWs({ code: code, host: false, mode: 'party' }));
       BF.G.transport.start();
       enterApp(); U.setTab('party');
     };
 
-    // pre-preenche URL do relay se ja foi usada antes
-    try {
-      const lastRelay = localStorage.getItem('bf_relay_url');
-      if (lastRelay) {
-        const hs = document.getElementById('hostServer'); if (hs && !hs.value) hs.value = lastRelay;
-        const js = document.getElementById('joinServer'); if (js && !js.value) js.value = lastRelay;
+    const rb = document.getElementById('resetBtn');
+    if (rb) rb.onclick = function () {
+      if (confirm('Sair deste jogo e voltar ao menu?')) {
+        try { if (BF.G.transport) BF.G.transport.close(); } catch (_) {}
+        BF.G.transport = null; BF.G.S = null;
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('setup').classList.remove('hidden');
+        BF.authUI && BF.authUI.refreshGames && BF.authUI.refreshGames();
       }
-    } catch (e) {}
-
-    document.getElementById('resetBtn').onclick = function () {
-      if (confirm('Reiniciar e apagar o jogo salvo?')) { localStorage.removeItem(KEY); location.reload(); }
     };
-    document.getElementById('saveBtn').onclick = function () { persist(); U.flash('Jogo salvo!'); };
+    const sb = document.getElementById('saveBtn');
+    if (sb) sb.onclick = function () {
+      // For\u00e7a um broadcast/save imediato se for host
+      if (BF.G.transport && BF.G.transport.role === 'host') {
+        BF.G.transport.broadcastState(BF.G.S);
+        U.flash('Jogo salvo na nuvem!');
+      } else {
+        U.flash('Apenas o anfitri\u00e3o salva o jogo.', true);
+      }
+    };
   }
 
-  document.addEventListener('DOMContentLoaded', showSetup);
+  // Helper exposto para a UI de "Meus jogos" abrir uma partida existente
+  BF.bootstrap = {
+    resumeAsHost: function (g) {
+      const u = BF.api && BF.api.getUser(); if (!u) { BF.authUI.show(); return; }
+      BF.me = { clubId: null, name: u.name };
+      BF.G.partyCode = g.code;
+      BF.G.S = null; // ser\u00e1 substitu\u00eddo pelo welcome.state vindo do DB
+      wire(makeWs({ code: g.code, host: true, mode: g.mode || 'party' }));
+      BF.G.transport.start();
+      enterApp();
+      if (g.mode === 'party') U.setTab && U.setTab('party');
+    },
+    resumeAsGuest: function (g) {
+      const u = BF.api && BF.api.getUser(); if (!u) { BF.authUI.show(); return; }
+      BF.me = { clubId: null, name: u.name };
+      BF.G.partyCode = g.code;
+      BF.G.S = C.buildWorld(g.code);
+      wire(makeWs({ code: g.code, host: false, mode: 'party' }));
+      BF.G.transport.start();
+      enterApp(); U.setTab && U.setTab('party');
+    },
+  };
+
+  // expoe troca de aba do setup para a UI de auth
+  BF.ui = BF.ui || {};
+  BF.ui.setMode = function (mode) {
+    document.querySelectorAll('.mode-tab').forEach(function (b) { b.classList.toggle('active', b.dataset.mode === mode); });
+    document.querySelectorAll('.mode-panel').forEach(function (p) { p.classList.toggle('hidden', p.dataset.panel !== mode); });
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // Bootstrap UI do setup (clubes solo + tabs) e auth
+    showSetup();
+    BF.authUI && BF.authUI.bootstrap && BF.authUI.bootstrap();
+  });
 })();
