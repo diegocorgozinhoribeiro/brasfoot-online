@@ -1,0 +1,13 @@
+{
+  "name": "brasfoot-online-master",
+  "version": "7.2.0",
+  "private": true,
+  "description": "Simulador de carreira como tecnico de clube de futebol, inspirado no classico Brasfoot.",
+  "scripts": {
+    "start": "npx --yes serve@latest -l 8000 .",
+    "dev": "npx --yes serve@latest -l 8000 ."
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

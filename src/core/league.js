@@ -24,7 +24,7 @@ BF.core.computeTable = function (S, div) {
   });
   return Object.keys(t).map(function (k) { const r = t[k]; r.SG = r.GP - r.GC; return r; })
     .sort(function (x, y) {
-      return y.P - x.P || y.SG - x.SG || y.GP - x.GP ||
+      return y.P - x.P || y.V - x.V || y.SG - x.SG || y.GP - x.GP ||
         C.clubById(S, x.id).name.localeCompare(C.clubById(S, y.id).name);
     });
 };

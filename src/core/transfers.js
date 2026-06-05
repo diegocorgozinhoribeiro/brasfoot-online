@@ -14,6 +14,7 @@ BF.core = BF.core || {};
   const C = BF.core;
 
   function isHuman(S, clubId) { return !!S.controlled[clubId]; }
+  function clubName(S, id) { const c = C.clubById(S, id); return c ? c.name : 'Clube'; }
 
   function finalize(S, neg, price) {
     const p = S.players.find(function (x) { return x.id === neg.playerId; });
@@ -23,12 +24,29 @@ BF.core = BF.core || {};
     if (C.squad(S, seller.id).length <= 11) { neg.status = 'rejected'; neg.history.push({ by: 'Sistema', action: 'Vendedor nao pode ficar com menos de 11' }); return; }
     buyer.budget = Math.round((buyer.budget - price) * 10) / 10;
     seller.budget = Math.round((seller.budget + price) * 10) / 10;
-    p.clubId = buyer.id; p.goals = 0;
+    // Reseta o estado do jogador ao mudar de clube: sai como recem-contratado,
+    // fora da lista de negociacao, sem gols na temporada e energia cheia.
+    p.clubId = buyer.id;
+    p.goals = 0;
+    p.listed = false;
+    p.energy = 100;
+    // conta a contratacao na temporada (usado nas metas da diretoria)
+    S.signings = S.signings || {};
+    S.signings[buyer.id] = (S.signings[buyer.id] || 0) + 1;
     // remove o jogador vendido da escalacao antiga
     if (S.lineups[seller.id]) S.lineups[seller.id] = S.lineups[seller.id].filter(function (id) { return id !== p.id; });
     neg.status = 'accepted'; neg.price = price;
-    neg.history.push({ by: 'Sistema', action: 'Negocio fechado por ' + price.toFixed(1) + ' mi' });
-    S.feed.unshift('TRANSFERENCIA: ' + p.name + ' -> ' + buyer.name + ' (' + price.toFixed(1) + ' mi)');
+    neg.history.push({ by: 'Sistema', action: 'Negócio fechado por ' + price.toFixed(1) + ' mi' });
+    S.feed.unshift('TRANSFERÊNCIA: ' + p.name + ' -> ' + buyer.name + ' (' + price.toFixed(1) + ' mi)');
+    // Outras propostas pendentes pelo mesmo jogador sao automaticamente
+    // recusadas — evita venda duplicada e bug do dinheiro multiplicando.
+    S.negotiations.forEach(function (other) {
+      if (other.id === neg.id) return;
+      if (other.playerId !== p.id) return;
+      if (['pending', 'counter'].indexOf(other.status) < 0) return;
+      other.status = 'rejected';
+      other.history.push({ by: 'Sistema', action: 'Jogador foi vendido a outro clube' });
+    });
   }
 
   // Decisao automatica da IA sobre uma proposta pendente (IA e a vendedora)
@@ -75,7 +93,7 @@ BF.core = BF.core || {};
     } else if (a.decision === 'reject') {
       neg.status = 'rejected'; neg.history.push({ by: name, action: 'Recusou' });
     } else if (a.decision === 'withdraw') {
-      neg.status = 'withdrawn'; neg.history.push({ by: name, action: 'Desistiu da negociacao' });
+      neg.status = 'withdrawn'; neg.history.push({ by: name, action: 'Desistiu da negociação' });
     } else if (a.decision === 'counter') {
       neg.amount = Math.round(a.amount * 10) / 10;
       neg.history.push({ by: name, action: 'Contraproposta', amount: neg.amount });
@@ -93,6 +111,38 @@ BF.core = BF.core || {};
     }
   };
 
+  C.toggleTransferList = function (S, a) {
+    const p = S.players.find(function (x) { return x.id === a.playerId && x.clubId === a.clubId; });
+    if (!p) return;
+    p.listed = !p.listed;
+    S.feed.unshift((p.listed ? 'MERCADO: ' : 'MERCADO: ') + p.name + (p.listed ? ' foi colocado na lista de negociaveis.' : ' saiu da lista de negociaveis.'));
+  };
+
+  C.extendContract = function (S, a) {
+    const p = S.players.find(function (x) { return x.id === a.playerId && x.clubId === a.clubId; });
+    const c = C.clubById(S, a.clubId);
+    if (!p || !c) return;
+    const months = Math.max(6, Math.min(60, Math.round(a.months || 24)));
+    const salary = Math.round(Math.max(0.01, a.salary || p.salary) * 1000) / 1000;
+    const expected = Math.round((p.value * 0.018 + 0.045 + Math.max(0, p.ovr - 78) * 0.006) * 1000) / 1000;
+    const rng = C.makeRng(C.hashSeed(S.seed + '-renew-' + p.id + '-' + S.round + '-' + S.season + '-' + salary));
+    let chance = 0.25 + (salary / Math.max(0.01, expected) - 0.85) * 0.75;
+    if (p.contract <= 12) chance += 0.12;
+    if (months >= 36 && p.age <= 30) chance += 0.08;
+    if (salary < p.salary) chance -= 0.35;
+    chance = Math.max(0.05, Math.min(0.95, chance));
+    if (rng() <= chance) {
+      p.contract = months;
+      p.salary = salary;
+      p.listed = false;
+      S.feed.unshift('CONTRATO: ' + p.name + ' renovou com o ' + c.name + ' por ' + months + ' meses.');
+      S.lastContract = { ok: true, playerId: p.id, msg: p.name + ' aceitou a renovacao.' };
+    } else {
+      S.feed.unshift('CONTRATO: ' + p.name + ' recusou a proposta do ' + c.name + '.');
+      S.lastContract = { ok: false, playerId: p.id, msg: p.name + ' recusou. Ele quer algo perto de ' + expected.toFixed(3) + ' mi/mes.' };
+    }
+  };
+
   // -------- MERCADO DA IA (roda a cada rodada) --------
   // Clubes de IA buscam reforcos para a posicao mais fraca do XI e fazem
   // propostas a OUTROS clubes (IA ou humanos). Negocios IA<->IA fecham na hora;
@@ -102,7 +152,7 @@ BF.core = BF.core || {};
       .filter(function (c) { return !isHuman(S, c.id) && c.budget > 10; });
     // ordem deterministica embaralhada pelo rng da rodada
     buyers.sort(function () { return rng() - 0.5; });
-    const picks = buyers.slice(0, 3);
+    const picks = buyers.slice(0, 5);
 
     picks.forEach(function (buyer) {
       const xi = C.lineupOf(S, buyer.id);
@@ -113,9 +163,16 @@ BF.core = BF.core || {};
           p.value <= buyer.budget * 0.8 && C.squad(S, p.clubId).length > 11;
       });
       if (!targets.length) return;
-      targets.sort(function (a, b) { return b.ovr - a.ovr; });
-      const tgt = targets[Math.floor(rng() * Math.min(5, targets.length))];
-      const amount = Math.round(tgt.value * (1.02 + rng() * 0.2) * 10) / 10;
+      // FORTE priorização para jogadores na lista ("Negociar")
+      targets.sort(function (a, b) {
+        return (b.listed ? 50 : 0) - (a.listed ? 50 : 0) ||
+          (a.contract <= 12 ? -6 : 0) - (b.contract <= 12 ? -6 : 0) ||
+          b.ovr - a.ovr;
+      });
+      // Maior chance de cair em um listado quando ele está no top da lista
+      const tgt = targets[Math.floor(rng() * Math.min(targets[0] && targets[0].listed ? 3 : 5, targets.length))];
+      const discount = tgt.listed ? 0.85 : (tgt.contract <= 12 ? 0.95 : 1);
+      const amount = Math.round(tgt.value * discount * (1.02 + rng() * 0.2) * 10) / 10;
       const neg = C.createOffer(S, { fromClubId: buyer.id, playerId: tgt.id, amount: amount, byAI: true });
       // Se o vendedor IA fez contraproposta, o comprador IA avalia automaticamente
       if (neg && neg.status === 'counter' && !isHuman(S, neg.fromClubId)) {
@@ -123,6 +180,23 @@ BF.core = BF.core || {};
         else C.respondOffer(S, { negId: neg.id, side: 'from', decision: 'reject' });
       }
     });
+
+    // Passe extra: para cada jogador LISTADO de um clube humano, gera até 1 proposta IA
+    // (clubes da IA "vêem" os listados e tendem a abordar).
+    const listedHumanPlayers = S.players.filter(function (p) {
+      return p.listed && isHuman(S, p.clubId);
+    });
+    listedHumanPlayers.forEach(function (p) {
+      if (rng() > 0.55) return; // ~45% por listado por rodada
+      const candidateBuyers = C.divClubs(S, 1).concat(C.divClubs(S, 2)).filter(function (c) {
+        return !isHuman(S, c.id) && c.id !== p.clubId && c.budget > p.value * 0.9;
+      });
+      if (!candidateBuyers.length) return;
+      const buyer = candidateBuyers[Math.floor(rng() * candidateBuyers.length)];
+      const amount = Math.round(p.value * (0.85 + rng() * 0.18) * 10) / 10;
+      C.createOffer(S, { fromClubId: buyer.id, playerId: p.id, amount: amount, byAI: true });
+    });
+
     // mantem o historico de negociacoes enxuto
     if (S.negotiations.length > 80) S.negotiations = S.negotiations.slice(0, 80);
   };

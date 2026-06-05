@@ -1,85 +1,191 @@
-# \u26bd Brasfoot Manager
+# Brasfoot Manager
 
-Simulador de carreira como administrador de clube de futebol, inspirado no clássico **Brasfoot**. Projeto educativo, sem afiliação oficial.
-
-> Código estruturado em camadas (núcleo / rede / interface), preparado para jogo **individual** e **online (party)**.
+Simulador de carreira como tecnico de clube de futebol, inspirado no classico Brasfoot. Projeto educativo, sem afiliacao oficial.
 
 ---
 
-## \ud83d\ude80 Como jogar
+## 1. Rodar local (sem instalar nada)
 
-### Individual (mais simples)
-Basta abrir o arquivo **`index.html`** com dois cliques no navegador. Escolha **Série A** ou **Série B**, selecione um clube e comece a carreira.
+### Opcao A - Abrir direto no navegador
 
-### Online — modo Party (você + amigos)
-O modo party usa `BroadcastChannel`. Para funcionar entre abas/dispositivos é preciso servir os arquivos por um servidor (não pelo `file://`):
+Clique duas vezes em `index.html`. Funciona em modo individual. O `localStorage` salva o jogo no proprio navegador.
+
+### Opcao B - Servidor local (recomendado)
+
+Servir por HTTP libera o modo party (entre abas) e evita problemas de cache do `file://`.
 
 ```bash
-cd brasfoot-manager
-python3 -m http.server 8000
-# abra http://localhost:8000 em cada aba/jogador
+# Python (qualquer SO com Python 3)
+python -m http.server 8000
+
+# Node (se tiver instalado)
+npx serve -l 8000 .
+# ou
+npm start
 ```
 
-1. Um jogador cria a party (vira **anfitrião/host**) e recebe um **código** (ex.: `BR-7Q2KP`).
-2. Os amigos entram com esse código.
-3. Na aba **Party**, cada um **assume um clube** (Série A ou B).
-4. O anfitrião controla o avanço das rodadas; o estado é sincronizado para todos.
-
-> Para jogar pela internet (fora da mesma máquina), basta trocar o transporte `partyTransport` por um adaptador WebSocket — a interface de rede já está isolada em `src/net/`.
+Depois abra http://localhost:8000.
 
 ---
 
-## \u2728 Funcionalidades
+## 2. Hospedar online (sem build, sem backend)
 
-- **Duas divisões:** Série A e Série B (20 clubes cada). Ao fim de cada temporada, os **4 últimos da Série A** trocam de lugar com os **4 primeiros da Série B** (acesso e rebaixamento).
-- **Partida ao vivo:** ao jogar, acompanhe a narração minuto a minuto, com placar, lances e a probabilidade de **azarão (zebra)**.
-- **Escalação:** defina seus **11 titulares** e escolha a **tática** (Ofensivo, Equilibrado, Contra-ataque, Defensivo, Retranca) — cada uma altera o desempenho no motor de jogo.
-- **Elenco:** veja atributos e **rescinda contratos** (pagando uma multa de ~30% do valor do jogador).
-- **Transferências:** procure jogadores de qualquer clube/divisão, **envie propostas no seu valor**, receba **contrapropostas** e feche negócios. Os **clubes de IA também negociam entre si e podem fazer propostas pelos seus jogadores**.
-- **Diretoria:** cada temporada tem uma **meta** (título, vaga na Libertadores, não cair, acesso, etc.). **Se você não cumprir, é demitido** e precisa procurar um novo clube.
-- **Finanças apertadas:** a cada rodada o caixa paga a folha salarial e recebe pouca bilheteria — vender jogadores é essencial para equilibrar as contas.
-- **O mundo segue para a IA:** todos os clubes jogam, movimentam o mercado e disputam as duas divisões a cada rodada.
-- **Determinístico por semente:** o código da party gera exatamente o mesmo mundo para todos os jogadores (sem dessincronização).
+O jogo eh 100% estatico: HTML + CSS + JS puro. **Nao tem build, nao tem servidor, nao tem banco.** Todo o estado mora no `localStorage` do navegador de cada jogador. Por isso voce pode subir a pasta inteira em qualquer host estatico e funciona na hora.
+
+### Opcao 1 - Vercel (mais rapido, 1 minuto)
+
+1. Acesse https://vercel.com/new
+2. Faca login com GitHub/GitLab/Bitbucket OU clique em "Deploy" e arraste a pasta inteira.
+3. Quando perguntar o framework, escolha **"Other"** (sem build).
+4. Pronto. Vercel devolve uma URL `https://seu-projeto.vercel.app`.
+
+O arquivo `vercel.json` ja esta configurado com cache headers.
+
+### Opcao 2 - Netlify (drag & drop)
+
+1. Acesse https://app.netlify.com/drop
+2. Arraste a pasta inteira pra cima da area de upload.
+3. Pronto. Recebe uma URL `https://NOME.netlify.app`.
+
+O `netlify.toml` ja esta configurado.
+
+### Opcao 3 - GitHub Pages (gratis e versionado)
+
+1. Crie um repositorio no GitHub e suba o codigo:
+   ```bash
+   git init
+   git add .
+   git commit -m "Brasfoot Manager v7.2"
+   git branch -M main
+   git remote add origin https://github.com/SEU-USUARIO/brasfoot.git
+   git push -u origin main
+   ```
+2. No GitHub: **Settings -> Pages -> Source: GitHub Actions**.
+3. O workflow `.github/workflows/deploy.yml` ja esta pronto e faz o deploy a cada push.
+4. URL final: `https://SEU-USUARIO.github.io/brasfoot/`.
+
+> O arquivo `.nojekyll` ja existe para garantir que o Pages nao filtre arquivos.
+
+### Opcao 4 - Cloudflare Pages
+
+1. Acesse https://dash.cloudflare.com/?to=/:account/pages
+2. "Create a project" -> Connect Git -> selecione o repositorio.
+3. **Build command:** deixe vazio. **Build output:** `/`.
+4. Deploy.
+
+### Opcao 5 - Servidor proprio (Apache / Nginx / qualquer hospedagem cPanel)
+
+Faca upload da pasta inteira via FTP/SFTP/painel para a `public_html` (ou equivalente). Acesse pelo dominio. Nao precisa configurar nada alem disso.
 
 ---
 
-## \ud83d\udcc1 Estrutura do projeto
+## 3. Multiplayer real entre dispositivos (WebSocket relay)
 
-```
-brasfoot-manager/
-├─ index.html              # Pagina principal e ordem de carregamento dos scripts
-├─ assets/
-│  └─ styles.css           # Tema escuro e estilos de todas as telas
-├─ src/
-│  ├─ data/
-│  │  └─ clubs.js          # Clubes (Serie A e B), nomes e formacao base
-│  ├─ core/                # LOGICA PURA (independente da interface)
-│  │  ├─ rng.js            # Gerador aleatorio com semente (determinismo)
-│  │  ├─ players.js        # Geracao de elencos
-│  │  ├─ fixtures.js       # Tabela de jogos (turno e returno)
-│  │  ├─ engine.js         # Motor de partida: gols, eventos, azarao, TATICAS
-│  │  ├─ league.js         # Classificacao por divisao
-│  │  ├─ transfers.js      # Negociacoes + mercado automatico da IA
-│  │  └─ state.js          # Estado + REDUCER central (applyAction) + diretoria
-│  ├─ net/                 # CAMADA DE REDE (abstrata e intercambiavel)
-│  │  ├─ transport.js      # Interface/fabrica de transporte
-│  │  ├─ localTransport.js # Modo individual (sem rede)
-│  │  └─ partyTransport.js # Modo party (host-autoritativo via BroadcastChannel)
-│  ├─ ui/                  # INTERFACE
-│  │  ├─ components.js     # Helpers de render (badges, formatacao, etc.)
-│  │  ├─ matchday.js       # Tela de partida ao vivo
-│  │  └─ app.js            # Abas e renderizacao de todas as telas
-│  └─ main.js              # Bootstrap, telas de inicio, dispatch e persistencia
-└─ README.md
-```
+O jogo agora suporta **multiplayer real entre dispositivos pela internet** atraves de um servidor WebSocket de relay (em `server/`). O servidor nao executa logica do jogo, apenas retransmite mensagens entre os jogadores de uma sala. O **host (anfitriao) continua sendo a autoridade** do estado.
+
+### Como usar
+
+1. **Hospede o relay.** Em poucos minutos no plano gratis do Render, Railway ou Fly.io. Veja `server/README.md` para o passo-a-passo de cada provedor. Voce vai receber uma URL `wss://meu-relay.onrender.com`.
+2. **Hospede o jogo** (Vercel, Netlify, GitHub Pages, etc. - veja secao 2).
+3. **Anfitriao:** abre o jogo, vai em "Criar party", preenche o nome **e o campo "Servidor relay"** com a URL `wss://...`. O jogo gera um codigo (ex.: `BR-7K2D9`).
+4. **Convidados:** abrem o jogo (no celular, no notebook, em qualquer lugar do mundo), vao em "Entrar na party", preenchem nome, codigo **e o mesmo servidor relay**. Pronto.
+
+A URL do servidor fica salva no `localStorage` para nao precisar digitar de novo.
+
+### Modos de multiplayer disponiveis
+
+| Modo | Campo "Servidor relay" | Onde funciona |
+|---|---|---|
+| Party local (BroadcastChannel) | vazio | Abas do mesmo navegador, mesma origem |
+| Multiplayer online (WebSocket) | `wss://seu-relay.com` | Qualquer dispositivo na internet |
 
 ### Arquitetura
-Toda mudança no jogo passa por um **reducer central** (`BF.core.applyAction(estado, acao)`), o que mantém o estado previsível e fácil de sincronizar no modo online. As ações disponíveis incluem:
-`PLAY_ROUND`, `PLAY_ALL`, `NEXT_SEASON`, `CLAIM_CLUB`, `RELEASE_CLUB`, `SET_LINEUP`, `SET_TACTIC`, `RESCIND`, `OFFER_CREATE`, `OFFER_RESPOND`.
 
-Isso torna trivial plugar um servidor WebSocket real: basta criar um novo transporte com a mesma interface de `src/net/`, sem mexer no motor (`core/`) nem na interface (`ui/`).
+```
+[Navegador A - HOST]  <----WebSocket---->  [Relay Node.js]  <----WebSocket---->  [Navegador B - GUEST]
+        |                                                                                  |
+        +-- mantem BF.G.S (estado autoritativo)                                              |
+        +-- recebe acoes dos guests via servidor                                             |
+        +-- envia broadcastState para todos via servidor              <--- recebe estado <---+
+```
+
+O contrato do transport (em `src/net/transport.js`) eh o mesmo para os tres modos (`solo`, `party` local, `ws`). Para criar novos tipos de transport (ex.: WebRTC peer-to-peer), basta implementar a mesma interface.
+
+> **HTTPS obrigatorio:** se o site do jogo esta em HTTPS, o relay tem que estar em `wss://` (TLS). Os hosts recomendados (Render, Railway, Fly.io) ja entregam TLS automatico.
 
 ---
 
-## \ud83d\udcbe Dados salvos
-O progresso do modo individual é salvo automaticamente no `localStorage` do navegador (chave `brasfoot_mgr_v2`). Use **Reiniciar** para apagar.
+## 4. Funcionalidades
+
+- Serie A e Serie B com 20 clubes cada (elencos reais da Serie A 2026 importados do bases.csv).
+- Acesso e rebaixamento: os 4 ultimos da Serie A caem e os 4 primeiros da Serie B sobem.
+- Classificacao para copas: G6 da Serie A vai para Libertadores; 7o ao 12o vai para Sul-Americana.
+- Copa do Brasil, Libertadores e Sul-Americana com fase de grupos (32 times, 8 grupos de 4) + mata-mata.
+- Campeoes de copas podem entrar na disputa por vaga na Libertadores seguinte.
+- Escalacao agrupada por posicao (goleiros, defesa, meio, ataque), taticas, formacoes 4-4-2 / 4-3-3 / 3-5-2 etc.
+- Mercado de transferencias com propostas, contra-propostas e IA negociando. Aceitar uma proposta cancela todas as outras pendentes pelo mesmo jogador.
+- Jogadores vendidos chegam ao novo clube "resetados" (fora da lista de negociacao, energia cheia).
+- Time so entra em campo com 11 jogadores escalados.
+- Diretoria com metas por porte/divisao e demissao se a meta nao for cumprida.
+- Historico de campeoes, artilheiros, acessos, rebaixamentos e copas.
+
+---
+
+## 5. Estrutura
+
+```text
+index.html              <- entrada
+assets/
+  styles.css            <- estilos base + overlay + modais
+  v5.css                <- estilos do match-day e tela de espera
+src/
+  data/
+    clubs.js            <- 40 clubes brasileiros + continentais
+    realPlayers.js      <- 495 jogadores reais da Serie A 2026
+  core/
+    rng.js              <- gerador deterministico
+    players.js          <- pool de jogadores por clube
+    fixtures.js         <- gerador de tabelas turno-returno
+    engine.js           <- simulacao de partida
+    league.js           <- pontos corridos, acesso/rebaixamento
+    cups.js             <- Copa do Brasil + Libertadores + Sul-Americana
+    transfers.js        <- mercado e negociacoes
+    state.js            <- reducer central (BF.core.applyAction)
+  net/
+    transport.js        <- contrato dos transports (factory)
+    localTransport.js   <- modo solo
+    partyTransport.js   <- party local (BroadcastChannel)
+    wsPartyTransport.js <- multiplayer online (WebSocket)
+  ui/
+    components.js       <- helpers de render
+    matchday.js         <- narracao ao vivo + pausa + substituicao
+    app.js              <- tabs (tabela, elenco, mercado, etc.)
+  main.js               <- bootstrap, dispatch, save/load (KEY=brasfoot_mgr_v7)
+server/
+  relay.js              <- servidor WebSocket relay (Node.js + ws)
+  package.json          <- dependencias do servidor
+  Dockerfile            <- container para Fly.io / VPS
+  render.yaml           <- blueprint do Render.com
+  fly.toml              <- config do Fly.io
+  README.md             <- guia de deploy do servidor
+vercel.json             <- config Vercel (site)
+netlify.toml            <- config Netlify (site)
+package.json            <- script `npm start` (npx serve, local)
+.github/workflows/      <- deploy automatico no GitHub Pages
+.nojekyll               <- compatibilidade GitHub Pages
+```
+
+Toda mudanca de jogo passa por `BF.core.applyAction`, mantendo o estado previsivel e serializavel (JSON).
+
+---
+
+## 6. Save game
+
+O progresso fica em `localStorage` na chave `brasfoot_mgr_v7`. Para zerar:
+
+```js
+localStorage.removeItem('brasfoot_mgr_v7')
+location.reload()
+```
+
+Ou use o botao "Reiniciar" no proprio jogo.

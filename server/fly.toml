@@ -1,0 +1,27 @@
+# Fly.io - rode `fly launch --copy-config --no-deploy` na pasta server/ e
+# depois `fly deploy`. Ajuste app name e regiao conforme seu plano.
+app = "brasfoot-relay"
+primary_region = "gru"  # Sao Paulo
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  MAX_ROOMS = "500"
+  MAX_MEMBERS = "8"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[http_service.checks]]
+  grace_period = "5s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"

@@ -19,6 +19,15 @@ window.BF = window.BF || {};
 BF.net = BF.net || {};
 
 BF.net.makeTransport = function (mode, opts) {
-  if (mode === 'party') return new BF.net.PartyTransport(opts || {});
-  return new BF.net.LocalTransport(opts || {});
+  opts = opts || {};
+  // 'ws'  -> multiplayer real entre dispositivos, via servidor relay WebSocket
+  // 'party' -> party local entre abas do mesmo navegador (BroadcastChannel)
+  // outros -> modo solo
+  if (mode === 'ws') return new BF.net.WsPartyTransport(opts);
+  if (mode === 'party') {
+    // Se o usuario informou um serverUrl, prefere WebSocket automaticamente.
+    if (opts.serverUrl) return new BF.net.WsPartyTransport(opts);
+    return new BF.net.PartyTransport(opts);
+  }
+  return new BF.net.LocalTransport(opts);
 };

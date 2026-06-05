@@ -14,10 +14,10 @@ BF.core = BF.core || {};
   // Taticas: atk = bonus no proprio ataque; opp = quanto o adversario marca a mais
   // (positivo = sua defesa fica mais exposta). Equilibrado e neutro.
   C.TACTICS = {
-    ofensivo:    { label: 'Ofensivo',      atk:  0.55, opp:  0.40, desc: 'Mais volume ofensivo, mas se expoe atras.' },
+    ofensivo:    { label: 'Ofensivo',      atk:  0.55, opp:  0.40, desc: 'Mais volume ofensivo, mas se expõe atrás.' },
     equilibrado: { label: 'Equilibrado',   atk:  0.00, opp:  0.00, desc: 'Postura neutra, sem grandes riscos.' },
     contra:      { label: 'Contra-ataque', atk:  0.15, opp: -0.25, desc: 'Cede a bola e busca o erro do rival.' },
-    defensivo:   { label: 'Defensivo',     atk: -0.35, opp: -0.45, desc: 'Prioriza nao sofrer gols.' },
+    defensivo:   { label: 'Defensivo',     atk: -0.35, opp: -0.45, desc: 'Prioriza não sofrer gols.' },
     retranca:    { label: 'Retranca',      atk: -0.70, opp: -0.70, desc: 'Fecha o jogo, placar baixo.' }
   };
   C.TACTIC_KEYS = ['ofensivo', 'equilibrado', 'contra', 'defensivo', 'retranca'];
@@ -73,7 +73,8 @@ BF.core = BF.core || {};
         do { m = C.rint(rng, 1, 90); guard++; } while (used[m] && guard < 30);
         used[m] = 1;
         const s = scorer(team); ids.push(s ? s.id : 0);
-        events.push({ minute: m, type: 'goal', side: side, player: s ? s.name : '' });
+        const isPenalty = rng() < 0.12;
+        events.push({ minute: m, type: isPenalty ? 'penalty_goal' : 'goal', side: side, player: s ? s.name : '', playerId: s ? s.id : 0 });
       }
       return ids;
     }
@@ -85,7 +86,7 @@ BF.core = BF.core || {};
       const m = C.rint(rng, 1, 90);
       const side = rng() < 0.5 ? 'home' : 'away';
       const t = rng();
-      const type = t < 0.5 ? 'chance' : (t < 0.82 ? 'save' : 'card');
+      const type = t < 0.48 ? 'chance' : (t < 0.75 ? 'save' : (t < 0.9 ? 'card' : 'injury'));
       const tm = side === 'home' ? home : away;
       events.push({ minute: m, type: type, side: side, player: scorer(tm).name });
     }
@@ -94,6 +95,15 @@ BF.core = BF.core || {};
     const upset = motivated && gap >= 4 &&
       ((weaker === 'home' && hg >= ag) || (weaker === 'away' && ag >= hg));
 
-    return { hg: hg, ag: ag, scorers: { home: hs, away: as }, events: events, upset: upset };
+    const stats = {
+      homeShots: Math.max(hg, C.rint(rng, 5, 15) + Math.round(Math.max(0, lh - 1))),
+      awayShots: Math.max(ag, C.rint(rng, 4, 13) + Math.round(Math.max(0, la - 1))),
+      homePoss: clamp(Math.round(50 + (home.strength - away.strength) / 2 + (ht.atk - at.atk) * 8 + C.rint(rng, -7, 7)), 35, 65),
+      xgHome: Math.round(lh * 100) / 100,
+      xgAway: Math.round(la * 100) / 100
+    };
+    stats.awayPoss = 100 - stats.homePoss;
+
+    return { hg: hg, ag: ag, scorers: { home: hs, away: as }, events: events, upset: upset, stats: stats };
   };
 })();

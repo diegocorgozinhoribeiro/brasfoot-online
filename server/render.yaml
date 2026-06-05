@@ -1,0 +1,18 @@
+# Render.com - Blueprint para deploy automatico do relay
+# Use este arquivo via "New Blueprint Instance" no dashboard do Render.
+services:
+  - type: web
+    name: brasfoot-relay
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install --omit=dev
+    startCommand: node relay.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MAX_ROOMS
+        value: 500
+      - key: MAX_MEMBERS
+        value: 8

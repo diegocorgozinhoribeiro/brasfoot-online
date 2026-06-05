@@ -4,25 +4,40 @@
 // Toda mudanca no jogo passa por applyAction(S, action). Isso torna o estado
 // previsivel e facil de sincronizar no modo online: o host aplica a acao e
 // retransmite o novo estado para todos os clientes.
-// Recursos: 2 divisoes (acesso/rebaixamento), escalacao 11 titulares + tatica,
-// diretoria com metas (demissao), rescisao de contrato e mercado da IA.
+// Recursos: 2 divisoes (acesso/rebaixamento), escalacao 11 titulares por
+// FORMACAO + tatica, diretoria com VARIAS metas (>=60% para manter o emprego),
+// ENERGIA dos jogadores, rescisao de contrato e mercado da IA.
 // ==========================================================================
 window.BF = window.BF || {};
 BF.core = BF.core || {};
 
 (function () {
   const C = BF.core, D = BF.data;
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
   C.clubById = function (S, id) { return S.clubs.find(function (c) { return c.id === id; }); };
   C.squad = function (S, id) { return S.players.filter(function (p) { return p.clubId === id; }); };
   C.divClubs = function (S, div) { return S.clubs.filter(function (c) { return c.division === div; }); };
 
+  // ---- Formacao do clube ----
+  C.formationOf = function (S, id) {
+    const key = (S.formations && S.formations[id]) || '4-4-2';
+    return D.FORMATIONS[key] || D.FORMATIONS['4-4-2'];
+  };
+  C.formNeed = function (S, id) { return C.formationOf(S, id).need || D.LINEUP_NEED; };
+
+  // ---- Energia ----
+  C.energyOf = function (p) { return (p.energy == null) ? 100 : p.energy; };
+  // overall efetivo considerando o cansaco (100 = cheio; 0 = -20%)
+  C.effOvr = function (p) { return p.ovr * (0.80 + 0.20 * C.energyOf(p) / 100); };
+
   // ---- Escalacao (XI titular) ----
-  C.autoLineup = function (sq) {
+  C.autoLineup = function (sq, need) {
+    need = need || D.LINEUP_NEED;
     const byPos = {};
     sq.forEach(function (p) { (byPos[p.pos] = byPos[p.pos] || []).push(p); });
     Object.keys(byPos).forEach(function (k) { byPos[k].sort(function (a, b) { return b.ovr - a.ovr; }); });
-    const need = D.LINEUP_NEED; const xi = []; const ids = {};
+    const xi = []; const ids = {};
     Object.keys(need).forEach(function (pos) {
       (byPos[pos] || []).slice(0, need[pos]).forEach(function (p) { xi.push(p); ids[p.id] = 1; });
     });
@@ -39,16 +54,20 @@ BF.core = BF.core || {};
     const saved = (S.lineups && S.lineups[id]) || [];
     const valid = saved.map(function (pid) { return sq.find(function (p) { return p.id === pid; }); }).filter(Boolean);
     if (valid.length === 11) return valid;
-    return C.autoLineup(sq);
+    return C.autoLineup(sq, C.formNeed(S, id));
+  };
+  C.benchOf = function (S, id) {
+    const ids = {}; C.lineupOf(S, id).forEach(function (p) { ids[p.id] = 1; });
+    return C.squad(S, id).filter(function (p) { return !ids[p.id]; }).sort(function (a, b) { return b.ovr - a.ovr; });
   };
   C.teamStrength = function (S, id) {
     const xi = C.lineupOf(S, id);
     if (!xi.length) return 60;
-    return xi.reduce(function (s, p) { return s + p.ovr; }, 0) / xi.length;
+    return xi.reduce(function (s, p) { return s + C.effOvr(p); }, 0) / xi.length;
   };
   C.teamObj = function (S, id) {
     const xi = C.lineupOf(S, id);
-    const strength = xi.length ? xi.reduce(function (s, p) { return s + p.ovr; }, 0) / xi.length : 60;
+    const strength = xi.length ? xi.reduce(function (s, p) { return s + C.effOvr(p); }, 0) / xi.length : 60;
     return {
       id: id, strength: strength,
       tactic: (S.tactics && S.tactics[id]) || 'equilibrado',
@@ -56,59 +75,139 @@ BF.core = BF.core || {};
     };
   };
 
-  // ---- Diretoria / metas ----
-  C.BOARD_TEXT = {
-    title:      'Ser campeao da Serie A',
-    top4:       'Terminar entre os 4 primeiros (vaga na Libertadores)',
-    top10:      'Terminar na primeira metade da tabela',
-    safe:       'Escapar do rebaixamento (fora dos 4 ultimos)',
-    promoTitle: 'Conquistar o acesso a Serie A (entre os 2 primeiros)',
-    promo:      'Conquistar o acesso a Serie A (entre os 4 primeiros)',
-    safeB:      'Manter o clube na Serie B (fora dos 4 ultimos)'
-  };
-  C.boardTarget = function (type) {
-    return { title: 1, top4: 4, top10: 10, safe: 16, promoTitle: 2, promo: 4, safeB: 16 }[type] || 10;
-  };
-  C.evalBoard = function (type, pos) { return pos > 0 && pos <= C.boardTarget(type); };
-  C.assignBoard = function (S, id) {
-    const c = C.clubById(S, id); if (!c) return;
+  // ====================== DIRETORIA / METAS (multi-objetivo) ================
+  // Cada clube recebe um conjunto de metas com peso. A pontuacao da diretoria
+  // e a media ponderada do cumprimento (0..1). Precisa de >= 60% para manter
+  // o emprego ao fim da temporada.
+  C.PASS_MARK = 0.6;
+
+  C.buildObjectives = function (S, id) {
+    const c = C.clubById(S, id); if (!c) return [];
     const peers = C.divClubs(S, c.division).slice().sort(function (a, b) { return b.strength - a.strength; });
     const rank = peers.findIndex(function (x) { return x.id === id; });
-    let type;
+    let posTarget, signTarget, cupStage, cupLabel;
     if (c.division === 1) {
-      if (rank < 3) type = 'title';
-      else if (rank < 7) type = 'top4';
-      else if (rank < 13) type = 'top10';
-      else type = 'safe';
+      if (rank < 3) posTarget = 4;
+      else if (rank < 7) posTarget = 8;
+      else if (rank < 13) posTarget = 12;
+      else posTarget = 16;
+      signTarget = rank < 7 ? 3 : 2;
+      cupStage = 2; cupLabel = 'Avançar até as quartas da Copa do Brasil';
     } else {
-      if (rank < 4) type = 'promoTitle';
-      else if (rank < 9) type = 'promo';
-      else type = 'safeB';
+      if (rank < 4) posTarget = 4;
+      else if (rank < 10) posTarget = 8;
+      else posTarget = 16;
+      signTarget = 2;
+      cupStage = 1; cupLabel = 'Vencer ao menos uma fase na Copa do Brasil';
     }
-    S.boards[id] = { type: type, status: 'ongoing' };
+    return [
+      { key: 'position', type: 'position', target: posTarget, weight: 3, label: 'Terminar até o ' + posTarget + 'º lugar na ' + (c.division === 1 ? 'Série A' : 'Série B') },
+      { key: 'cup', type: 'cup', cup: 'copaBrasil', stage: cupStage, weight: 2, label: cupLabel },
+      { key: 'signings', type: 'signings', target: signTarget, weight: 1, label: 'Contratar ao menos ' + signTarget + ' reforço(s) na temporada' },
+      { key: 'finance', type: 'finance', target: 0, weight: 1, label: 'Encerrar a temporada sem dívidas (caixa ≥ 0)' }
+    ];
+  };
+
+  C.clubCupWins = function (S, id, cupKey) {
+    const cup = S.cups && S.cups[cupKey];
+    if (!cup) return 0;
+    return cup.fixtures.filter(function (f) { return f.played && f.winnerId === id; }).length;
+  };
+
+  // Cumprimento de uma meta (0..1). pos = posicao atual/final do clube.
+  C.evalObjective = function (S, id, obj, pos) {
+    const c = C.clubById(S, id); if (!c) return 0;
+    if (obj.type === 'position') {
+      if (!pos || pos < 1) return 0;
+      if (pos <= obj.target) return 1;
+      return Math.max(0, 1 - (pos - obj.target) * 0.12);
+    }
+    if (obj.type === 'signings') {
+      const done = (S.signings && S.signings[id]) || 0;
+      return clamp(done / Math.max(1, obj.target), 0, 1);
+    }
+    if (obj.type === 'finance') {
+      if (c.budget >= obj.target) return 1;
+      if (c.budget >= obj.target - 20) return 0.5;
+      return 0;
+    }
+    if (obj.type === 'cup') {
+      const cup = S.cups && S.cups[obj.cup];
+      if (cup && cup.championId === id) return 1;
+      const wins = C.clubCupWins(S, id, obj.cup);
+      return clamp(wins / Math.max(1, obj.stage), 0, 1);
+    }
+    return 0;
+  };
+  // Detalhe textual do progresso de uma meta
+  C.objProgressText = function (S, id, obj, pos) {
+    if (obj.type === 'position') return 'Atual: ' + (pos || '-') + 'º';
+    if (obj.type === 'signings') return 'Contratações: ' + ((S.signings && S.signings[id]) || 0) + '/' + obj.target;
+    if (obj.type === 'finance') { const c = C.clubById(S, id); return 'Caixa: ' + (c ? c.budget.toFixed(1) : '-') + ' mi'; }
+    if (obj.type === 'cup') {
+      const cup = S.cups && S.cups[obj.cup];
+      if (cup && cup.championId === id) return 'Campeão!';
+      return 'Fases vencidas: ' + C.clubCupWins(S, id, obj.cup) + '/' + obj.stage;
+    }
+    return '';
+  };
+  C.boardScore = function (S, id, pos) {
+    const b = S.boards[id]; if (!b || !b.objectives) return 0;
+    let w = 0, s = 0;
+    b.objectives.forEach(function (o) { w += o.weight; s += o.weight * C.evalObjective(S, id, o, pos); });
+    return w ? s / w : 0;
+  };
+  C.assignBoard = function (S, id) {
+    S.boards[id] = { objectives: C.buildObjectives(S, id), status: 'ongoing' };
   };
 
   // ---- Construcao do mundo ----
+  // Calendário único: cada rodada possui apenas UM torneio (Brasileirão, Lib/Sula
+  // ou Copa do Brasil). As rodadas de copa são intercaladas às 38 rodadas de liga.
   function buildAllFixtures(S) {
     const d1 = C.divClubs(S, 1).map(function (c) { return c.id; });
     const d2 = C.divClubs(S, 2).map(function (c) { return c.id; });
-    const fx1 = C.buildFixtures(d1).map(function (f) { f.div = 1; return f; });
-    const fx2 = C.buildFixtures(d2).map(function (f) { f.div = 2; return f; });
+    const fx1 = C.buildFixtures(d1).map(function (f) { f.div = 1; f.lr = f.round; return f; });
+    const fx2 = C.buildFixtures(d2).map(function (f) { f.div = 2; f.lr = f.round; return f; });
+    const leagueRoundsCount = Math.max.apply(null, fx1.concat(fx2).map(function (f) { return f.lr; }));
+    // Rodadas globais reservadas para copas (mesmo índice para LIB e SULA).
+    const continentalRounds = [3, 7, 11, 15, 22, 30, 38];
+    const copaBrasilRounds = [5, 13, 20, 27, 35];
+    const cupRoundsSet = {};
+    continentalRounds.forEach(function (r) { cupRoundsSet[r] = 'continental'; });
+    copaBrasilRounds.forEach(function (r) { cupRoundsSet[r] = 'copaBrasil'; });
+    const totalRounds = leagueRoundsCount + continentalRounds.length + copaBrasilRounds.length;
+    const lrMap = {};
+    let lr = 1;
+    for (let g = 1; g <= totalRounds && lr <= leagueRoundsCount; g++) {
+      if (cupRoundsSet[g]) continue;
+      lrMap[lr] = g;
+      lr++;
+    }
+    fx1.forEach(function (f) { f.round = lrMap[f.lr]; });
+    fx2.forEach(function (f) { f.round = lrMap[f.lr]; });
     S.fixtures = fx1.concat(fx2);
-    S.totalRounds = Math.max.apply(null, S.fixtures.map(function (f) { return f.round; }));
+    S.totalRounds = totalRounds;
+    S.calendar = {
+      continentalRounds: continentalRounds.slice(),
+      copaBrasilRounds: copaBrasilRounds.slice(),
+      leagueRoundsCount: leagueRoundsCount
+    };
   }
 
   C.buildWorld = function (seed) {
     const rng = C.makeRng(C.hashSeed(seed));
-    const clubs = D.CLUBS.map(function (c) { return Object.assign({}, c); });
+    const clubs = D.CLUBS.concat(D.CONTINENTAL_CLUBS || []).map(function (c) { return Object.assign({}, c); });
     const players = C.genAllPlayers(clubs, rng);
     const S = {
       seed: seed, season: 1, year: 2026, round: 1, totalRounds: 1,
       clubs: clubs, players: players, fixtures: [],
       history: [], controlled: {}, negotiations: [], lastRound: null, feed: [], negId: 1,
-      lineups: {}, tactics: {}, boards: {}, fired: {}
+      lineups: {}, tactics: {}, formations: {}, boards: {}, fired: {}, votes: {},
+      signings: {}, cups: {}, cupSlots: null, nextCupSlots: null
     };
     buildAllFixtures(S);
+    if (C.prepareSeasonCups) C.prepareSeasonCups(S);
     return S;
   };
 
@@ -130,8 +229,28 @@ BF.core = BF.core || {};
     S.clubs.forEach(function (c) { c.budget = Math.round(c.budget * 10) / 10; });
   }
 
+  // ---- Energia: quem jogou cansa; quem ficou de fora recupera ----
+  function updateEnergy(S, r) {
+    const rng = C.makeRng(C.hashSeed(S.seed + '-energy' + r + '-' + S.season));
+    const played = {};
+    S.fixtures.filter(function (f) { return f.round === r && f.played; }).forEach(function (f) { played[f.homeId] = 1; played[f.awayId] = 1; });
+    Object.keys(S.cups || {}).forEach(function (k) {
+      (S.cups[k].fixtures || []).filter(function (f) { return f.round === r && f.played; }).forEach(function (f) { played[f.homeId] = 1; played[f.awayId] = 1; });
+    });
+    S.clubs.forEach(function (c) {
+      const xi = {}; C.lineupOf(S, c.id).forEach(function (p) { xi[p.id] = 1; });
+      const didPlay = played[c.id];
+      C.squad(S, c.id).forEach(function (p) {
+        if (p.energy == null) p.energy = 100;
+        if (didPlay && xi[p.id]) p.energy = clamp(p.energy - C.rint(rng, 3, 6), 0, 100);    // titular jogou: cansa pouco
+        else p.energy = clamp(p.energy + C.rint(rng, 6, 12), 0, 100);                       // reserva/folga: recupera
+      });
+    });
+  }
+
   C.playRound = function (S) {
     if (S.round > S.totalRounds) return;
+    if (C.ensureSeasonCups) C.ensureSeasonCups(S);
     const r = S.round;
     const rng = C.makeRng(C.hashSeed(S.seed + '-r' + r + '-s' + S.season));
     const matches = [];
@@ -142,10 +261,16 @@ BF.core = BF.core || {};
       res.scorers.home.concat(res.scorers.away).forEach(function (pid) {
         const p = S.players.find(function (x) { return x.id === pid; }); if (p) p.goals++;
       });
-      matches.push({ homeId: f.homeId, awayId: f.awayId, hg: res.hg, ag: res.ag, upset: res.upset, div: f.div, events: res.events });
+      matches.push({ homeId: f.homeId, awayId: f.awayId, hg: res.hg, ag: res.ag, upset: res.upset, div: f.div, comp: 'league', events: res.events, stats: res.stats });
       if (res.upset) S.feed.unshift('ZEBRA! ' + C.clubById(S, f.homeId).name + ' ' + res.hg + ' x ' + res.ag + ' ' + C.clubById(S, f.awayId).name + ' (rod. ' + r + ')');
     });
+    if (C.playCupRound) {
+      const cupMatches = C.playCupRound(S, r);
+      cupMatches.forEach(function (m) { matches.push(m); });
+    }
     roundFinance(S, r);
+    updateEnergy(S, r);
+    S.players.forEach(function (p) { p.contract = Math.max(0, (p.contract || 24) - 1); });
     // O mundo segue para os times de IA tambem: janela de transferencias automatica
     const trng = C.makeRng(C.hashSeed(S.seed + '-tr' + r + '-s' + S.season));
     C.aiTransferWindow(S, trng);
@@ -155,9 +280,12 @@ BF.core = BF.core || {};
   };
 
   function endSeason(S) {
+    if (C.ensureSeasonCups) C.ensureSeasonCups(S);
     const t1 = C.computeTable(S, 1), t2 = C.computeTable(S, 2);
     const champ = C.clubById(S, t1[0].id); champ.titles++;
     const art = S.players.slice().sort(function (a, b) { return b.goals - a.goals; })[0];
+    const cupWinners = C.cupWinners ? C.cupWinners(S) : {};
+    const nextCupSlots = C.computeNextCupSlots ? C.computeNextCupSlots(S, t1, t2) : null;
 
     // Avaliacao das metas da diretoria (antes do rebaixamento alterar divisoes)
     Object.keys(S.controlled).forEach(function (idStr) {
@@ -165,14 +293,15 @@ BF.core = BF.core || {};
       const tbl = c.division === 1 ? t1 : t2;
       const pos = tbl.findIndex(function (rr) { return rr.id === id; }) + 1;
       const b = S.boards[id]; if (!b) return;
-      const met = C.evalBoard(b.type, pos);
-      b.status = met ? 'met' : 'failed'; b.finalPos = pos;
+      const score = C.boardScore(S, id, pos);
+      const met = score >= C.PASS_MARK;
+      b.status = met ? 'met' : 'failed'; b.finalPos = pos; b.score = Math.round(score * 100);
       if (met) {
-        S.feed.unshift('DIRETORIA: ' + c.name + ' cumpriu a meta da temporada (' + pos + 'o lugar).');
+        S.feed.unshift('DIRETORIA: ' + c.name + ' cumpriu as metas da temporada (' + b.score + '% \u2022 ' + pos + 'º lugar).');
       } else {
-        S.fired[id] = { clubName: c.name, year: S.year, board: b.type, pos: pos };
+        S.fired[id] = { clubName: c.name, year: S.year, pos: pos, score: b.score };
         delete S.controlled[id]; // o clube volta a ser controlado pela IA
-        S.feed.unshift('DEMISSAO: a diretoria do ' + c.name + ' demitiu o tecnico (meta nao cumprida, ' + pos + 'o lugar).');
+        S.feed.unshift('DEMISSÃO: a diretoria do ' + c.name + ' demitiu o técnico (metas em ' + b.score + '%, abaixo de 60%).');
       }
     });
 
@@ -184,16 +313,26 @@ BF.core = BF.core || {};
 
     S.history.unshift({
       year: S.year, championId: t1[0].id, championBId: t2[0].id,
-      promoted: promo, relegated: releg,
+      promoted: promo, relegated: releg, cupWinners: cupWinners, cupSlots: nextCupSlots,
       artil: art ? { name: art.name, goals: art.goals, clubId: art.clubId } : null
     });
-    S.feed.unshift('FIM DA TEMPORADA ' + S.year + ': ' + champ.name + ' campeao da Serie A; ' + C.clubById(S, t2[0].id).name + ' campeao da Serie B.');
+    S.nextCupSlots = nextCupSlots;
+    if (nextCupSlots) {
+      const libNames = nextCupSlots.libertadores.map(function (id) { const c = C.clubById(S, id); return c ? c.short : ''; }).filter(Boolean).join(', ');
+      const sulNames = nextCupSlots.sulamericana.map(function (id) { const c = C.clubById(S, id); return c ? c.short : ''; }).filter(Boolean).join(', ');
+      S.feed.unshift('VAGAS ' + (S.year + 1) + ': Libertadores (' + libNames + '); Sul-Americana (' + sulNames + ').');
+    }
+    S.feed.unshift('FIM DA TEMPORADA ' + S.year + ': ' + champ.name + ' campeão da Série A; ' + C.clubById(S, t2[0].id).name + ' campeão da Série B.');
   }
 
   C.nextSeason = function (S) {
     S.season++; S.year++; S.round = 1;
-    S.players.forEach(function (p) { p.goals = 0; p.age++; });
+    S.signings = {};
+    S.players.forEach(function (p) { p.goals = 0; p.age++; p.contract = Math.max(6, (p.contract || 12)); p.energy = 100; });
+    S.cupSlots = S.nextCupSlots || (C.initialCupSlots ? C.initialCupSlots(S) : S.cupSlots);
+    S.nextCupSlots = null;
     buildAllFixtures(S);
+    if (C.prepareSeasonCups) C.prepareSeasonCups(S);
     S.lastRound = null;
     // Novas metas para quem segue no comando
     Object.keys(S.controlled).forEach(function (idStr) { C.assignBoard(S, +idStr); });
@@ -210,7 +349,7 @@ BF.core = BF.core || {};
     c.budget = Math.round((c.budget - fee) * 10) / 10;
     S.players = S.players.filter(function (x) { return x.id !== p.id; });
     if (S.lineups[a.clubId]) S.lineups[a.clubId] = S.lineups[a.clubId].filter(function (id) { return id !== p.id; });
-    S.feed.unshift('RESCISAO: ' + p.name + ' deixou o ' + c.name + ' (multa ' + fee.toFixed(1) + ' mi)');
+    S.feed.unshift('RESCISÃO: ' + p.name + ' deixou o ' + c.name + ' (multa ' + fee.toFixed(1) + ' mi)');
   };
 
   // ----------------- REDUCER CENTRAL -----------------
@@ -218,13 +357,23 @@ BF.core = BF.core || {};
     S = JSON.parse(JSON.stringify(S)); // estado imutavel: trabalhamos sobre uma copia
     switch (a.type) {
       case 'PLAY_ROUND': C.playRound(S); break;
+      case 'REQUEST_PLAY_ROUND':
+        S.votes = S.votes || {};
+        S.votes.playRound = S.votes.playRound || { round: S.round, names: [] };
+        if (S.votes.playRound.round !== S.round) S.votes.playRound = { round: S.round, names: [] };
+        if (a.name && S.votes.playRound.names.indexOf(a.name) < 0) S.votes.playRound.names.push(a.name);
+        if ((a.required || 1) <= S.votes.playRound.names.length) { C.playRound(S); S.votes.playRound = null; }
+        break;
       case 'PLAY_ALL': while (S.round <= S.totalRounds) C.playRound(S); break;
       case 'NEXT_SEASON': C.nextSeason(S); break;
       case 'CLAIM_CLUB': S.controlled[a.clubId] = a.name; delete S.fired[a.clubId]; C.assignBoard(S, a.clubId); break;
       case 'RELEASE_CLUB': delete S.controlled[a.clubId]; delete S.boards[a.clubId]; delete S.fired[a.clubId]; break;
       case 'SET_LINEUP': S.lineups[a.clubId] = (a.lineup || []).slice(0, 11); break;
       case 'SET_TACTIC': S.tactics[a.clubId] = a.tactic; break;
+      case 'SET_FORMATION': S.formations[a.clubId] = a.formation; break;
       case 'RESCIND': C.rescind(S, a); break;
+      case 'TOGGLE_LISTED': C.toggleTransferList(S, a); break;
+      case 'EXTEND_CONTRACT': C.extendContract(S, a); break;
       case 'OFFER_CREATE': C.createOffer(S, a); break;
       case 'OFFER_RESPOND': C.respondOffer(S, a); break;
       default: break;
