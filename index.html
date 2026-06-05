@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brasfoot Manager</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<!-- ===================== TELA DE INICIO ===================== -->
+<div id="setup">
+  <div class="setup-box">
+    <div class="logo"><span class="ball">\u26bd</span><div><h1>Brasfoot <span>Manager</span></h1><p>Simulador de carreira como administrador de clube</p></div></div>
+
+    <div id="continueWrap" style="display:none">
+      <button class="btn primary big" id="continueBtn">\u25b6 Continuar jogo salvo</button>
+      <div class="or">ou comece um novo</div>
+    </div>
+
+    <div class="mode-tabs">
+      <button class="mode-tab active" data-mode="solo">\ud83d\udc64 Individual</button>
+      <button class="mode-tab" data-mode="host">\ud83c\udf89 Criar party</button>
+      <button class="mode-tab" data-mode="join">\ud83d\udd17 Entrar na party</button>
+    </div>
+
+    <!-- SOLO -->
+    <div class="mode-panel" data-panel="solo">
+      <p class="panel-hint">Escolha o clube que voce vai comandar:</p>
+      <div class="div-switch" id="soloDivSwitch"><button class="active" data-div="1">Serie A</button><button data-div="2">Serie B</button></div>
+      <div id="soloClubs" class="club-pick scroll"></div>
+      <button class="btn primary big" id="soloStart" disabled>Comecar carreira</button>
+    </div>
+
+    <!-- CRIAR PARTY -->
+    <div class="mode-panel hidden" data-panel="host">
+      <p class="panel-hint">Crie uma sala, compartilhe o codigo e cada amigo assume um time.</p>
+      <label class="fld">Seu nome<input id="hostName" placeholder="Ex.: Diego" maxlength="16"></label>
+      <button class="btn primary big" id="hostStart">Criar party</button>
+      <p class="tiny">Voce sera o anfitriao (host) e controla o avanco das rodadas.</p>
+    </div>
+
+    <!-- ENTRAR PARTY -->
+    <div class="mode-panel hidden" data-panel="join">
+      <p class="panel-hint">Entre com o codigo que o anfitriao compartilhou.</p>
+      <label class="fld">Seu nome<input id="joinName" placeholder="Ex.: Ana" maxlength="16"></label>
+      <label class="fld">Codigo da party<input id="joinCode" placeholder="BR-XXXXX" maxlength="10"></label>
+      <button class="btn primary big" id="joinStart">Entrar</button>
+      <p class="tiny">Funciona entre abas do mesmo navegador. Para jogar entre dispositivos, sirva por um servidor local (veja o README).</p>
+    </div>
+  </div>
+  <div class="setup-foot">Inspirado no classico Brasfoot \u2022 projeto educativo, sem afiliacao oficial</div>
+</div>
+
+<!-- ===================== APLICACAO ===================== -->
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><span class="ball">\u26bd</span> Brasfoot <b>Manager</b></div>
+    <div id="clubChip" class="club-chip"></div>
+    <div class="head-actions"><button class="btn sm" id="saveBtn">Salvar</button><button class="btn sm ghost" id="resetBtn">Reiniciar</button></div>
+  </header>
+
+  <nav id="tabs">
+    <button class="active" data-tab="home">\ud83c\udfe0 Inicio</button>
+    <button data-tab="squad">\ud83d\udc65 Elenco</button>
+    <button data-tab="lineup">\ud83d\udccb Escalacao</button>
+    <button data-tab="table">\ud83c\udfc6 Tabela</button>
+    <button data-tab="fixtures">\ud83d\udcc5 Jogos</button>
+    <button data-tab="market">\ud83d\udd01 Transferencias</button>
+    <button data-tab="board">\ud83c\udfdb\ufe0f Diretoria</button>
+    <button data-tab="finance">\ud83d\udcb0 Financas</button>
+    <button data-tab="history">\ud83d\udcdc Historico</button>
+    <button data-tab="party">\ud83d\udc65 Party</button>
+  </nav>
+
+  <main id="view"></main>
+</div>
+
+<div id="flash" class="flash"></div>
+
+<!-- ============ SCRIPTS (ordem importa: classic scripts, sem modulos) ============ -->
+<script src="src/data/clubs.js"></script>
+<script src="src/core/rng.js"></script>
+<script src="src/core/players.js"></script>
+<script src="src/core/fixtures.js"></script>
+<script src="src/core/engine.js"></script>
+<script src="src/core/league.js"></script>
+<script src="src/core/transfers.js"></script>
+<script src="src/core/state.js"></script>
+<script src="src/net/transport.js"></script>
+<script src="src/net/localTransport.js"></script>
+<script src="src/net/partyTransport.js"></script>
+<script src="src/ui/components.js"></script>
+<script src="src/ui/matchday.js"></script>
+<script src="src/ui/app.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
