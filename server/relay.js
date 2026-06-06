@@ -192,14 +192,13 @@ function membersOf(room) {
 }
 function emitPresence(room) { broadcast(room, { t: 'presence', members: membersOf(room) }); }
 
+// v10.6: auto-save DESLIGADO. Save acontece SOMENTE quando o cliente envia
+// {t:'save'} (botao Salvar no topo). Isso alivia o Postgres durante partidas
+// longas com varias acoes seguidas. O state ainda eh broadcastado em tempo
+// real para os peers (eles tem a versao mais recente em memoria); so o disco
+// que so persiste sob comando.
 function scheduleSave(room, code) {
-  if (room.saveTimer) return;
-  room.saveTimer = setTimeout(async () => {
-    room.saveTimer = null;
-    if (!room.lastState) return;
-    try { await db.updateGameState(code, room.lastState); }
-    catch (e) { console.error('[save state]', code, e.message); }
-  }, STATE_SAVE_DEBOUNCE_MS);
+  // no-op. Mantido para retrocompat.
 }
 async function flushSave(room, code) {
   if (room.saveTimer) { clearTimeout(room.saveTimer); room.saveTimer = null; }
@@ -323,10 +322,16 @@ wss.on('connection', (ws) => {
     if (ws._role === 'host') {
       if (m.t === 'state') {
         if (m.S) {
+          // guarda em memoria (para o save sob demanda + para enviar a guests
+          // que conectarem depois), mas NAO grava no Postgres.
           room.lastState = m.S;
-          scheduleSave(room, ws._code);
         }
         broadcast(room, m, ws);
+      } else if (m.t === 'signal') {
+        // v10.6: broadcast de sinal generico (countdown, etc) para todos os peers,
+        // INCLUINDO o proprio host (echo). Nao toca no state nem no banco.
+        broadcast(room, m);
+        jsend(ws, m); // echo para o host tambem ver o countdown
       } else if (m.t === 'save') {
         // forca gravar JA no Postgres (sem debounce) e confirma ao cliente
         try {

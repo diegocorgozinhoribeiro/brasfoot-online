@@ -46,16 +46,47 @@ window.BF = window.BF || {};
       BF.G.transport.sendAction(action); // guest -> host
     }
   };
-  // v10.5: simplificado — sem sistema de quorum/votacao.
-  // O HOST decide quando iniciar a rodada. Clica e dispara imediatamente.
-  // Guests recebem o novo state via broadcast e a narracao abre automaticamente.
-  // (O modelo de votacao causava travamento se um peer perdia conexao.)
+  // v10.6: sem votacao. Host clica -> countdown 3s sincronizado em todos os
+  // peers -> PLAY_ROUND dispara para todos.
+  function showCountdownOverlay(sec, onDone) {
+    document.querySelectorAll('.wait-overlay,.bf-countdown').forEach(function (el) {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    });
+    const ov = document.createElement('div');
+    ov.className = 'bf-countdown';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(8,12,20,0.92);z-index:99999;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-family:system-ui,sans-serif';
+    ov.innerHTML = '<div style="font-size:18px;opacity:0.7;margin-bottom:10px">\u26bd Pr\u00f3xima rodada come\u00e7a em\u2026</div>' +
+                   '<div id="cdNum" style="font-size:140px;font-weight:800;line-height:1;color:#22c55e;text-shadow:0 0 30px rgba(34,197,94,0.5)">' + sec + '</div>' +
+                   '<div style="font-size:14px;opacity:0.6;margin-top:14px">Todos os jogadores ver\u00e3o a partida ao vivo</div>';
+    document.body.appendChild(ov);
+    let n = sec;
+    const iv = setInterval(function () {
+      n -= 1;
+      const el = ov.querySelector('#cdNum');
+      if (n <= 0) {
+        clearInterval(iv);
+        if (el) el.textContent = 'VAI!';
+        setTimeout(function () {
+          if (ov.parentNode) ov.parentNode.removeChild(ov);
+          if (typeof onDone === 'function') onDone();
+        }, 350);
+      } else {
+        if (el) el.textContent = n;
+      }
+    }, 1000);
+  }
+
   BF.requestPlayRound = function () {
-    if (isAuthority()) {
-      BF.dispatch({ type: 'PLAY_ROUND' });
+    if (!isAuthority()) {
+      U.flash('Apenas o anfitri\u00e3o pode iniciar a rodada.', true);
+      return;
+    }
+    // Em party: avisa todos os peers para mostrarem o countdown ao mesmo tempo
+    if (BF.G.transport && BF.G.transport.role === 'host' && BF.G.transport.broadcastSignal) {
+      BF.G.transport.broadcastSignal({ type: 'countdown', sec: 3, at: Date.now() });
     } else {
-      // Guest nao deveria ter chamado, mas por seguranca pede ao host.
-      U.flash('Apenas o host pode iniciar a rodada.', true);
+      // Solo: countdown local apenas
+      showCountdownOverlay(3, function () { BF.dispatch({ type: 'PLAY_ROUND' }); });
     }
   };
 
@@ -129,6 +160,16 @@ window.BF = window.BF || {};
       BF.G.S = C.applyAction(BF.G.S, action); persist(); BF.G.transport.broadcastState(BF.G.S); U.render(); maybeWatch();
     });
     t.on('status', function (st) { /* connected | disconnected */ });
+    // v10.6: countdown sincronizado para iniciar rodada
+    t.on('signal', function (d) {
+      if (!d || d.type !== 'countdown') return;
+      const sec = Math.max(1, Math.min(10, d.sec || 3));
+      showCountdownOverlay(sec, function () {
+        // Somente o host efetiva o PLAY_ROUND ao fim do countdown.
+        if (isAuthority()) BF.dispatch({ type: 'PLAY_ROUND' });
+        // Guests apenas exibem o countdown; quando o state chegar, maybeWatch abre a narracao.
+      });
+    });
     t.on('error', function (e) {
       const msg = (e && e.msg) ? e.msg : String(e || 'Erro de conex\u00e3o');
       U.flash(msg, true);
@@ -295,16 +336,9 @@ window.BF = window.BF || {};
         U.flash('Apenas o anfitri\u00e3o salva o jogo.', true);
       }
     };
-    // Salva antes de fechar a aba (best-effort), evitando perda de mudancas
-    // entre o ultimo broadcast e o debounce de 3s do relay.
-    window.addEventListener('beforeunload', function () {
-      try {
-        if (BF.G.transport && BF.G.transport.role === 'host') {
-          BF.G.transport.broadcastState(BF.G.S);
-          if (BF.G.transport.requestSave) BF.G.transport.requestSave();
-        }
-      } catch (_) {}
-    });
+    // v10.6: SEM auto-save no beforeunload. Salvamento só acontece quando o
+    // usuário clica em Salvar no cartão superior. Se ele cair ou fechar a aba
+    // sem salvar, o progresso desde o último Salvar é perdido (alivia o Postgres).
   }
 
   // Helper exposto para a UI de "Meus jogos" abrir uma partida existente

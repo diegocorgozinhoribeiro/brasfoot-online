@@ -13,6 +13,9 @@ BF.ui.playMatch = function (match, S, onDone) {
   const events = match.events.slice();
   let hg = 0, ag = 0, minute = 0, idx = 0, timer = null;
   let paused = false, halfPaused = false;
+  // v10.6: contador de substituicoes na partida atual (limite 5 por time controlado)
+  const SUB_LIMIT = 5;
+  let subsUsed = 0;
 
   function compTag() {
     if (match.cupName) return '<span class="md-comp cup">' + U.esc(match.cupName) + (match.stageName ? ' \u2022 ' + U.esc(match.stageName) : '') + '</span>';
@@ -370,17 +373,21 @@ BF.ui.playMatch = function (match, S, onDone) {
       // salva formação (se mudou) e a escalação atualizada (apenas titulares ocupados)
       const orig = (S.formations && S.formations[clubId]) || '4-4-2';
       const formChanged = (formKey !== orig);
-      if (formChanged) BF.dispatch({ type: 'SET_FORMATION', clubId: clubId, formation: formKey });
       const lineup = sel.filter(Boolean);
+      const wentOut = origLineup.filter(function (id) { return lineup.indexOf(id) < 0; });
+      const cameIn  = lineup.filter(function (id) { return origLineup.indexOf(id) < 0; });
+      const reqSubs = Math.min(wentOut.length, cameIn.length);
+      // v10.6: bloqueia se exceder limite de 5 subs por partida
+      if (subsUsed + reqSubs > SUB_LIMIT) {
+        const restante = Math.max(0, SUB_LIMIT - subsUsed);
+        U.flash('Limite de ' + SUB_LIMIT + ' substitui\u00e7\u00f5es atingido. Voc\u00ea ainda pode fazer ' + restante + '.', true);
+        return;
+      }
+      if (formChanged) BF.dispatch({ type: 'SET_FORMATION', clubId: clubId, formation: formKey });
       let subsApplied = 0;
       if (lineup.length) {
         BF.dispatch({ type: 'SET_LINEUP', clubId: clubId, lineup: lineup });
-        // v10.5: aplica substituicoes na PARTIDA ATUAL.
-        // Identifica jogadores que SAIRAM (estavam em origLineup mas nao em lineup)
-        // e quem ENTROU (esta em lineup mas nao em origLineup). Eventos futuros
-        // do jogador que saiu sao remapeados para o jogador que entrou.
-        const wentOut = origLineup.filter(function (id) { return lineup.indexOf(id) < 0; });
-        const cameIn  = lineup.filter(function (id) { return origLineup.indexOf(id) < 0; });
+        // v10.6: aplica substituicoes na PARTIDA ATUAL.
         if (wentOut.length && cameIn.length) {
           // mapa: outId -> inId (mesmo índice; se sobrar/faltar, cicla)
           const remap = {};
@@ -401,14 +408,15 @@ BF.ui.playMatch = function (match, S, onDone) {
               if (np) { ev.assistId = np.id; ev.assist = np.name; }
             }
           }
-          subsApplied = wentOut.length;
+          subsApplied = Math.min(wentOut.length, cameIn.length);
+          subsUsed += subsApplied;
           // narra cada substituicao no feed da partida
           wentOut.forEach(function (outId, i) {
             const inId = cameIn[i % cameIn.length];
             const pOut = sq.find(function (x) { return x.id === outId; });
             const pIn  = sq.find(function (x) { return x.id === inId; });
             if (pOut && pIn) {
-              line("<span class='md-min'>" + minute + "'</span> \ud83d\udd04 Substitui\u00e7\u00e3o em " + U.esc(C.clubById(BF.G.S, clubId).name) + ": entra <b>" + U.esc(pIn.name) + "</b>, sai <b>" + U.esc(pOut.name) + "</b>.", 'md-sub');
+              line("<span class='md-min'>" + minute + "'</span> \ud83d\udd04 Substitui\u00e7\u00e3o (" + subsUsed + "/" + SUB_LIMIT + ") em " + U.esc(C.clubById(BF.G.S, clubId).name) + ": entra <b>" + U.esc(pIn.name) + "</b>, sai <b>" + U.esc(pOut.name) + "</b>.", 'md-sub');
             }
           });
         }

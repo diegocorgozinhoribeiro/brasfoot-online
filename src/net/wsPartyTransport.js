@@ -96,6 +96,10 @@
         case 'state':
           self._emit('state', m.S);
           break;
+        case 'signal':
+          // v10.6: sinal generico (ex: countdown da rodada).
+          self._emit('signal', m.d || {});
+          break;
         case 'action':
           self._emit('action', m.action);
           break;
@@ -140,6 +144,13 @@
   WsPartyTransport.prototype.requestSave = function () {
     // pede ao servidor para gravar JA o estado atual no Postgres (ignora debounce)
     this._send({ t: 'save' });
+  };
+
+  // v10.6: envia um sinal generico para TODOS os peers (incluindo eco para o host).
+  // Usado para countdown da rodada, etc.
+  WsPartyTransport.prototype.broadcastSignal = function (data) {
+    if (this.role !== 'host') return;
+    this._send({ t: 'signal', d: data || {} });
   };
 
   WsPartyTransport.prototype.broadcastState = function (S) {

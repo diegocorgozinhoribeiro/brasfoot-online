@@ -124,6 +124,9 @@ BF.ui = BF.ui || {};
     const tb = C.computeTable(s, me.division);
     const pos = tb.findIndex(function (r) { return r.id === me.id; }) + 1;
     const row = tb.find(function (r) { return r.id === me.id; }) || { P: 0 };
+    // v10.6: fallback caso o state esteja vindo do servidor com round indefinido
+    if (s.round == null) s.round = 1;
+    if (s.totalRounds == null) s.totalRounds = 38;
     const done = s.round > s.totalRounds;
     const thisRound = done ? [] : gamesForClubInRound(s, me.id, s.round).filter(function (g) { return !g.f.played; });
     const nextG = done ? null : nextGameOf(s, me.id);
@@ -142,7 +145,7 @@ BF.ui = BF.ui || {};
         '<div class="card"><div class="row-between"><h2 style="margin:0">\u26a1 Controle de jogo</h2><span class="muted">' + me.name + ' \u2022 força do XI ' + Math.round(C.teamStrength(s, me.id)) + ' \u2022 ' + (C.TACTICS[s.tactics[me.id] || 'equilibrado'].label) + '</span></div>' +
           (done
             ? '<p class="muted" style="margin-bottom:12px">Temporada encerrada. Veja o histórico e comece a próxima.</p><button class="btn gold" id="nextSeasonBtn">\u25b6 Iniciar temporada ' + (s.year + 1) + '</button>'
-            : (thisRound.length ? '' : '<div class="watch-note">\ud83d\udd2d Seu time não joga a ' + s.round + 'ª rodada. Avance para acompanhar os outros jogos.</div>') + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px"><button class="btn primary" id="playBtn">\u25b6 ' + playButtonLabel(s) + '</button></div>' + voteLine(s)) +
+            : (thisRound.length ? '' : '<div class="watch-note">\ud83d\udd2d Seu time não joga a ' + s.round + 'ª rodada. Avance para acompanhar os outros jogos.</div>') + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px"><button class="btn primary" id="playBtn" ' + (BF.canStartRound && !BF.canStartRound() ? 'disabled title="Apenas o anfitri\u00e3o pode iniciar a rodada"' : '') + '>\u25b6 ' + playButtonLabel(s) + '</button></div>' + hostHint(s)) +
         '</div>' +
         (b ? boardMini(s, me, b, pos) : '') +
         (!done && thisRound.length ? '<div class="card"><h2>\ud83d\udcc5 Seus jogos na ' + s.round + 'ª rodada</h2><div class="matchlist">' + thisRound.map(function (g) { return matchRowComp(g); }).join('') + '</div></div>' : '') +
@@ -182,17 +185,17 @@ BF.ui = BF.ui || {};
     return '<div class="comp-row ' + meta.cls + '"><span class="comp-pill">' + meta.label + (g.f.stageName ? ' \u2022 ' + g.f.stageName : '') + '</span>' + matchRow(g.f) + '</div>';
   }
 
-  function voteLine(s) {
+  // v10.6: votação removida. Em party, mostra dica de quem inicia a rodada.
+  function hostHint(s) {
     const t = BF.G.transport;
     if (!t || t.role === 'solo') return '';
-    const v = s.votes && s.votes.playRound && s.votes.playRound.round === s.round ? s.votes.playRound : null;
-    const required = Math.max(1, Math.ceil(Math.max(1, (BF.G.members || []).length) * 2 / 3));
-    return '<p class="muted" style="margin-top:10px">Votação para iniciar: ' + (v ? v.names.length : 0) + '/' + required + (v && v.names.length ? ' - ' + v.names.map(U.esc).join(', ') : '') + '</p>';
+    if (t.role === 'host') return '<p class="muted" style="margin-top:10px">Você é o anfitrião. Clique para iniciar a ' + (s.round || 1) + 'ª rodada — todos verão a partida com contagem de 3s.</p>';
+    return '<p class="muted" style="margin-top:10px">Aguardando o anfitrião iniciar a ' + (s.round || 1) + 'ª rodada…</p>';
   }
   function playButtonLabel(s) {
-    const t = BF.G.transport;
-    if (!t || t.role === 'solo') return 'Pré-Iniciar a ' + s.round + 'ª rodada';
-    return 'Pré-Iniciar a ' + s.round + 'ª rodada (votação)';
+    const r = s.round || 1;
+    if (BF.canStartRound && !BF.canStartRound()) return 'Aguardando anfitrião iniciar a ' + r + 'ª rodada';
+    return 'Iniciar a ' + r + 'ª rodada';
   }
 
   // ---------- PRE-INICIAR (modal de revisão antes da simulação) ----------
@@ -668,15 +671,27 @@ BF.ui = BF.ui || {};
     s.clubs.filter(function (c) { return c.id !== me.id; }).forEach(function (c) { clubOpts += '<option value="' + c.id + '">' + c.name + ' (' + divName(c.division) + ')</option>'; });
 
     // ----- Filtros do mercado -----
-    BF._marketFilter = BF._marketFilter || { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40 };
+    BF._marketFilter = BF._marketFilter || { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40, div: 0 };
     const f = BF._marketFilter;
     const filterClub = BF._marketClub || 0;
     const posList = ['', 'GOL', 'ZAG', 'LAT', 'VOL', 'MEI', 'ATA'];
     const posOpts = posList.map(function (p) {
       return '<option value="' + p + '"' + (f.pos === p ? ' selected' : '') + '>' + (p || 'Todas posições') + '</option>';
     }).join('');
+    // v10.6: filtro de liga (Serie A / Serie B / Todas)
+    const divOpts = [
+      '<option value="0"' + (f.div === 0 ? ' selected' : '') + '>Todas as ligas</option>',
+      '<option value="1"' + (f.div === 1 ? ' selected' : '') + '>Brasileirão Série A</option>',
+      '<option value="2"' + (f.div === 2 ? ' selected' : '') + '>Brasileirão Série B</option>'
+    ].join('');
     const searchVal = (f.search || '').toLowerCase();
     let targets = s.players.filter(function (p) { return p.clubId !== me.id; });
+    if (f.div) {
+      targets = targets.filter(function (p) {
+        const c = C.clubById(s, p.clubId);
+        return c && c.division === f.div;
+      });
+    }
     if (filterClub) targets = targets.filter(function (p) { return p.clubId === filterClub; });
     if (f.pos) targets = targets.filter(function (p) { return p.pos === f.pos; });
     if (f.ovrMin > 0) targets = targets.filter(function (p) { return p.ovr >= f.ovrMin; });
@@ -690,6 +705,7 @@ BF.ui = BF.ui || {};
       '<div class="market-filters" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0">' +
         '<div><label class="tiny muted">Buscar nome</label><input id="mfSearch" type="text" placeholder="ex: Neymar" value="' + U.esc(f.search) + '" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit"></div>' +
         '<div><label class="tiny muted">Posição</label><select id="mfPos" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + posOpts + '</select></div>' +
+        '<div><label class="tiny muted">Liga</label><select id="mfDiv" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + divOpts + '</select></div>' +
         '<div><label class="tiny muted">Clube</label><select id="mfClub" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + clubOpts + '</select></div>' +
         '<div><label class="tiny muted">OVR mínimo: <b id="mfOvrLbl">' + (f.ovrMin || 0) + '</b></label><input id="mfOvr" type="range" min="0" max="99" value="' + (f.ovrMin || 0) + '" style="width:100%"></div>' +
         '<div><label class="tiny muted">Idade min: <b id="mfAgeMinLbl">' + (f.ageMin || 16) + '</b></label><input id="mfAgeMin" type="range" min="16" max="40" value="' + (f.ageMin || 16) + '" style="width:100%"></div>' +
@@ -781,6 +797,7 @@ BF.ui = BF.ui || {};
     BF._marketFilter = BF._marketFilter || { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40 };
     const mfClub = $('#mfClub'); if (mfClub) { mfClub.value = String(BF._marketClub || 0); mfClub.onchange = function () { BF._marketClub = +mfClub.value; U.render(); }; }
     const mfPos = $('#mfPos'); if (mfPos) mfPos.onchange = function () { BF._marketFilter.pos = mfPos.value; U.render(); };
+    const mfDiv = $('#mfDiv'); if (mfDiv) mfDiv.onchange = function () { BF._marketFilter.div = +mfDiv.value; U.render(); };
     const mfSearch = $('#mfSearch');
     if (mfSearch) {
       // debounce leve para nao re-renderizar a cada tecla
@@ -793,7 +810,7 @@ BF.ui = BF.ui || {};
     const mfOvr = $('#mfOvr'); if (mfOvr) { mfOvr.oninput = function () { document.getElementById('mfOvrLbl').textContent = mfOvr.value; }; mfOvr.onchange = function () { BF._marketFilter.ovrMin = +mfOvr.value; U.render(); }; }
     const mfAgeMin = $('#mfAgeMin'); if (mfAgeMin) { mfAgeMin.oninput = function () { document.getElementById('mfAgeMinLbl').textContent = mfAgeMin.value; }; mfAgeMin.onchange = function () { BF._marketFilter.ageMin = +mfAgeMin.value; U.render(); }; }
     const mfAgeMax = $('#mfAgeMax'); if (mfAgeMax) { mfAgeMax.oninput = function () { document.getElementById('mfAgeMaxLbl').textContent = mfAgeMax.value; }; mfAgeMax.onchange = function () { BF._marketFilter.ageMax = +mfAgeMax.value; U.render(); }; }
-    const mfClear = $('#mfClear'); if (mfClear) mfClear.onclick = function () { BF._marketFilter = { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40 }; BF._marketClub = 0; U.render(); };
+    const mfClear = $('#mfClear'); if (mfClear) mfClear.onclick = function () { BF._marketFilter = { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40, div: 0 }; BF._marketClub = 0; U.render(); };
     const nb = $('#newClubBtn'); if (nb) nb.onclick = function () { U.setTab('party'); };
     document.querySelectorAll('.cup-tab').forEach(function (b) { b.onclick = function () { BF._cupKey = b.dataset.cup; U.render(); }; });
     document.querySelectorAll('.comp-subtab').forEach(function (b) { b.onclick = function () { BF._compSub = b.dataset.sub; U.render(); }; });
