@@ -5,10 +5,16 @@
   const TKEY = 'bf_token';
   const UKEY = 'bf_user';
   const SKEY = 'bf_relay_url';
+  const DEFAULT_RELAY = 'wss://brasfoot-online.onrender.com';
 
   function getBase() {
-    try { return localStorage.getItem(SKEY) || ''; } catch (e) { return ''; }
+    try {
+      const v = localStorage.getItem(SKEY);
+      if (v && v.trim()) return v.trim();
+    } catch (e) {}
+    return DEFAULT_RELAY;
   }
+  BF.DEFAULT_RELAY = DEFAULT_RELAY;
   function setBase(url) {
     try { if (url) localStorage.setItem(SKEY, url); else localStorage.removeItem(SKEY); } catch (e) {}
   }

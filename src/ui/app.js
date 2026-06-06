@@ -645,10 +645,38 @@ BF.ui = BF.ui || {};
 
     let clubOpts = '<option value="0">Todos os clubes</option>';
     s.clubs.filter(function (c) { return c.id !== me.id; }).forEach(function (c) { clubOpts += '<option value="' + c.id + '">' + c.name + ' (' + divName(c.division) + ')</option>'; });
+
+    // ----- Filtros do mercado -----
+    BF._marketFilter = BF._marketFilter || { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40 };
+    const f = BF._marketFilter;
     const filterClub = BF._marketClub || 0;
+    const posList = ['', 'GOL', 'ZAG', 'LAT', 'VOL', 'MEI', 'ATA'];
+    const posOpts = posList.map(function (p) {
+      return '<option value="' + p + '"' + (f.pos === p ? ' selected' : '') + '>' + (p || 'Todas posições') + '</option>';
+    }).join('');
+    const searchVal = (f.search || '').toLowerCase();
     let targets = s.players.filter(function (p) { return p.clubId !== me.id; });
     if (filterClub) targets = targets.filter(function (p) { return p.clubId === filterClub; });
-    targets = targets.sort(function (a, b) { return b.ovr - a.ovr; }).slice(0, 60);
+    if (f.pos) targets = targets.filter(function (p) { return p.pos === f.pos; });
+    if (f.ovrMin > 0) targets = targets.filter(function (p) { return p.ovr >= f.ovrMin; });
+    if (f.ageMin > 16) targets = targets.filter(function (p) { return p.age >= f.ageMin; });
+    if (f.ageMax < 40) targets = targets.filter(function (p) { return p.age <= f.ageMax; });
+    if (searchVal) targets = targets.filter(function (p) { return p.name.toLowerCase().indexOf(searchVal) >= 0; });
+    const totalMatches = targets.length;
+    targets = targets.sort(function (a, b) { return b.ovr - a.ovr; }).slice(0, 80);
+
+    const filterBarHtml = (
+      '<div class="market-filters" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0">' +
+        '<div><label class="tiny muted">Buscar nome</label><input id="mfSearch" type="text" placeholder="ex: Neymar" value="' + U.esc(f.search) + '" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit"></div>' +
+        '<div><label class="tiny muted">Posição</label><select id="mfPos" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + posOpts + '</select></div>' +
+        '<div><label class="tiny muted">Clube</label><select id="mfClub" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + clubOpts + '</select></div>' +
+        '<div><label class="tiny muted">OVR mínimo: <b id="mfOvrLbl">' + (f.ovrMin || 0) + '</b></label><input id="mfOvr" type="range" min="0" max="99" value="' + (f.ovrMin || 0) + '" style="width:100%"></div>' +
+        '<div><label class="tiny muted">Idade min: <b id="mfAgeMinLbl">' + (f.ageMin || 16) + '</b></label><input id="mfAgeMin" type="range" min="16" max="40" value="' + (f.ageMin || 16) + '" style="width:100%"></div>' +
+        '<div><label class="tiny muted">Idade max: <b id="mfAgeMaxLbl">' + (f.ageMax || 40) + '</b></label><input id="mfAgeMax" type="range" min="16" max="40" value="' + (f.ageMax || 40) + '" style="width:100%"></div>' +
+        '<div style="display:flex;align-items:flex-end"><button class="btn sm" id="mfClear">Limpar filtros</button></div>' +
+      '</div>' +
+      '<p class="tiny muted" style="margin:-4px 0 8px">Mostrando ' + targets.length + ' de ' + totalMatches + ' jogadores que batem com os filtros.</p>'
+    );
 
     // Lista de transferência: jogadores marcados como negociáveis em qualquer outro clube
     const listedAll = s.players.filter(function (p) { return p.listed && p.clubId !== me.id; })
@@ -671,8 +699,9 @@ BF.ui = BF.ui || {};
       (inbox.length ? '<div class="card"><h2>\ud83d\udce5 Aguardando sua decisão</h2><div class="neg-grid">' + inbox.map(negCard).join('') + '</div></div>' : '') +
       (active.length ? '<div class="card"><h2>\u23f3 Negociações em andamento</h2><div class="neg-grid">' + active.map(negCard).join('') + '</div></div>' : '') +
       listedHtml +
-      '<div class="card"><div class="row-between"><h2 style="margin:0">\ud83d\udd01 Mercado \u2014 contratar jogadores</h2><select id="marketClub">' + clubOpts + '</select></div>' +
-        '<p class="muted" style="margin-bottom:10px">Escolha um jogador (de qualquer divisão) e envie uma proposta no seu valor. O outro clube pode aceitar, recusar ou contrapropor.</p>' +
+      '<div class="card"><div class="row-between"><h2 style="margin:0">\ud83d\udd01 Mercado \u2014 contratar jogadores</h2></div>' +
+        '<p class="muted" style="margin-bottom:6px">Escolha um jogador (de qualquer divisão) e envie uma proposta. Use os filtros para encontrar reforços por posição, clube, OVR e idade.</p>' +
+        filterBarHtml +
         '<div class="tbl-wrap"><table><thead><tr><th>Jogador</th><th class="c">Pos</th><th class="c">OVR</th><th class="c">Idade</th><th>Clube</th><th class="c">Valor</th><th></th></tr></thead><tbody>' +
         targets.map(function (p) {
           const c = C.clubById(s, p.clubId);
@@ -727,6 +756,23 @@ BF.ui = BF.ui || {};
     const ns = $('#nextSeasonBtn'); if (ns) ns.onclick = function () { BF.dispatch({ type: 'NEXT_SEASON' }); };
     const rs = $('#roundSel'); if (rs) { renderRound(rs.value); rs.onchange = function () { renderRound(rs.value); }; }
     const mc = $('#marketClub'); if (mc) { mc.value = String(BF._marketClub || 0); mc.onchange = function () { BF._marketClub = +mc.value; U.render(); }; }
+    // --- filtros do mercado ---
+    BF._marketFilter = BF._marketFilter || { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40 };
+    const mfClub = $('#mfClub'); if (mfClub) { mfClub.value = String(BF._marketClub || 0); mfClub.onchange = function () { BF._marketClub = +mfClub.value; U.render(); }; }
+    const mfPos = $('#mfPos'); if (mfPos) mfPos.onchange = function () { BF._marketFilter.pos = mfPos.value; U.render(); };
+    const mfSearch = $('#mfSearch');
+    if (mfSearch) {
+      // debounce leve para nao re-renderizar a cada tecla
+      let searchTimer = null;
+      mfSearch.oninput = function () {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () { BF._marketFilter.search = mfSearch.value; U.render(); setTimeout(function () { const x = document.getElementById('mfSearch'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } }, 0); }, 200);
+      };
+    }
+    const mfOvr = $('#mfOvr'); if (mfOvr) { mfOvr.oninput = function () { document.getElementById('mfOvrLbl').textContent = mfOvr.value; }; mfOvr.onchange = function () { BF._marketFilter.ovrMin = +mfOvr.value; U.render(); }; }
+    const mfAgeMin = $('#mfAgeMin'); if (mfAgeMin) { mfAgeMin.oninput = function () { document.getElementById('mfAgeMinLbl').textContent = mfAgeMin.value; }; mfAgeMin.onchange = function () { BF._marketFilter.ageMin = +mfAgeMin.value; U.render(); }; }
+    const mfAgeMax = $('#mfAgeMax'); if (mfAgeMax) { mfAgeMax.oninput = function () { document.getElementById('mfAgeMaxLbl').textContent = mfAgeMax.value; }; mfAgeMax.onchange = function () { BF._marketFilter.ageMax = +mfAgeMax.value; U.render(); }; }
+    const mfClear = $('#mfClear'); if (mfClear) mfClear.onclick = function () { BF._marketFilter = { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40 }; BF._marketClub = 0; U.render(); };
     const nb = $('#newClubBtn'); if (nb) nb.onclick = function () { U.setTab('party'); };
     document.querySelectorAll('.cup-tab').forEach(function (b) { b.onclick = function () { BF._cupKey = b.dataset.cup; U.render(); }; });
     document.querySelectorAll('.comp-subtab').forEach(function (b) { b.onclick = function () { BF._compSub = b.dataset.sub; U.render(); }; });

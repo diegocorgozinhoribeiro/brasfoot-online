@@ -35,8 +35,7 @@
     const email = ($('authEmail').value || '').trim();
     const pwd   = ($('authPass').value || '');
     const name  = ($('authName').value || '').trim();
-    const srv   = ($('authServer').value || '').trim();
-    if (!srv) { flash('Informe o servidor relay', true); return; }
+    const srv   = ($('authServer').value || '').trim() || (window.BF && window.BF.DEFAULT_RELAY) || 'wss://brasfoot-online.onrender.com';
     api.setBase(srv);
     if (!email || !pwd) { flash('Preencha e-mail e senha', true); return; }
     if (modeRegister && !name) { flash('Informe seu nome', true); return; }

@@ -327,6 +327,14 @@ wss.on('connection', (ws) => {
           scheduleSave(room, ws._code);
         }
         broadcast(room, m, ws);
+      } else if (m.t === 'save') {
+        // forca gravar JA no Postgres (sem debounce) e confirma ao cliente
+        try {
+          await flushSave(room, ws._code);
+          jsend(ws, { t: 'saved', ok: true, ts: Date.now() });
+        } catch (e) {
+          jsend(ws, { t: 'saved', ok: false, msg: e.message });
+        }
       } else if (m.t === 'sync-request') {
         // host re-pediu sync (raro)
         return;

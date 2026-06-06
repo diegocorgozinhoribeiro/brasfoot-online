@@ -60,7 +60,13 @@ window.BF = window.BF || {};
   // mostra a contagem de votos até atingir o mínimo.
   BF.showRoundWaiting = function (onReady) {
     const isSolo = isSoloGame();
-    const required = isSolo ? 1 : requiredVotes();
+    // SOLO: sem overlay de espera. A narração já é uma tela cheia, então
+    // mostrar "1/1" antes só atrasa o jogo. Dispara onReady imediatamente.
+    if (isSolo) {
+      if (typeof onReady === 'function') onReady();
+      return;
+    }
+    const required = requiredVotes();
     // limpa qualquer overlay residual de rodadas anteriores antes de criar
     // um novo (a partir da 2a rodada o anterior poderia ainda estar no DOM
     // dependendo do timing do re-render).
@@ -83,28 +89,8 @@ window.BF = window.BF || {};
     ov.style.visibility = 'visible';
     ov.style.opacity = '1';
     document.body.appendChild(ov);
-    // Forca o navegador a fazer layout/paint do overlay antes de prosseguir.
-    // Sem isso, em rodadas subsequentes o re-render sincrono apos onReady()
-    // pode encobrir o overlay antes dele aparecer na tela.
     void ov.offsetHeight;
     function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
-    if (isSolo) {
-      // 1) Pinta o overlay sincronamente (acima).
-      // 2) Em duas frames de animacao + 850ms, fecha e dispara o onReady.
-      // O uso de requestAnimationFrame garante que o overlay seja pintado
-      // antes de iniciar a contagem, evitando o bug em que rodadas seguintes
-      // pulavam direto para a partida sem mostrar a tela de espera.
-      requestAnimationFrame(function () {
-        requestAnimationFrame(function () {
-          const bar = ov.querySelector('#wcBar'); if (bar) bar.style.width = '100%';
-          setTimeout(function () {
-            close();
-            if (typeof onReady === 'function') onReady();
-          }, 850);
-        });
-      });
-      return;
-    }
     // Party: dispara o pedido e fica observando vote count via S.votes
     // O quorum é 100% dos membros conectados — ninguém fura fila.
     if (typeof onReady === 'function') onReady();
@@ -242,6 +228,16 @@ window.BF = window.BF || {};
     }
   }
 
+  // -------- listener de save confirmation (relay -> client) --------
+  // O 'saved' eh enviado pelo relay quando processa um {t:'save'} (flush forcado)
+  // ou um broadcast de state apos o debounce. Mostramos um toast pro usuario.
+  BF._wireSaveAck = function (t) {
+    t.on && t.on('saved', function (m) {
+      if (m && m.ok) U.flash('Jogo salvo na nuvem ✓');
+      else U.flash('Falha ao salvar: ' + (m && m.msg || ''), true);
+    });
+  };
+
   // -------- telas de inicio --------
   function showSetup() {
     // seletor de clube (modo solo) - com divisao
@@ -332,14 +328,27 @@ window.BF = window.BF || {};
     };
     const sb = document.getElementById('saveBtn');
     if (sb) sb.onclick = function () {
-      // For\u00e7a um broadcast/save imediato se for host
+      // 1) Atualiza o estado mais recente no servidor (broadcast).
+      // 2) Pede flush IMEDIATO no Postgres (sem o debounce de 3s).
+      // 3) Mostra confirmação 'Jogo salvo' quando o relay responde 'saved'.
       if (BF.G.transport && BF.G.transport.role === 'host') {
         BF.G.transport.broadcastState(BF.G.S);
-        U.flash('Jogo salvo na nuvem!');
+        if (BF.G.transport.requestSave) BF.G.transport.requestSave();
+        U.flash('Salvando…');
       } else {
         U.flash('Apenas o anfitri\u00e3o salva o jogo.', true);
       }
     };
+    // Salva antes de fechar a aba (best-effort), evitando perda de mudancas
+    // entre o ultimo broadcast e o debounce de 3s do relay.
+    window.addEventListener('beforeunload', function () {
+      try {
+        if (BF.G.transport && BF.G.transport.role === 'host') {
+          BF.G.transport.broadcastState(BF.G.S);
+          if (BF.G.transport.requestSave) BF.G.transport.requestSave();
+        }
+      } catch (_) {}
+    });
   }
 
   // Helper exposto para a UI de "Meus jogos" abrir uma partida existente

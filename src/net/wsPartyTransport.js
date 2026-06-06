@@ -137,6 +137,11 @@
     try { this._ws.send(JSON.stringify(m)); } catch (e) {}
   };
 
+  WsPartyTransport.prototype.requestSave = function () {
+    // pede ao servidor para gravar JA o estado atual no Postgres (ignora debounce)
+    this._send({ t: 'save' });
+  };
+
   WsPartyTransport.prototype.broadcastState = function (S) {
     if (this.role !== 'host') return;
     this._send({ t: 'state', S: S });

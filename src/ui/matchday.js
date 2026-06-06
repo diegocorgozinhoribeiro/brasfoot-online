@@ -213,7 +213,8 @@ BF.ui.playMatch = function (match, S, onDone) {
     }
 
     const box = modal('<div class="pause-panel"><h1>' + title + '</h1>' +
-      '<p class="sub">Mexa na tática, mude a formação ou arraste um reserva sobre um titular para substituir. Você pode confirmar sem trocar ninguém.</p>' +
+      '<p class="sub">Toque num jogador e depois em outro para trocar. No desktop, também pode arrastar (drag &amp; drop). Pode confirmar sem trocar ninguém.</p>' +
+      '<p class="sub" id="subHint" style="min-height:18px;color:#22c55e"></p>' +
       '<div class="pause-grid">' +
         '<div>' +
           '<h3 class="mini-h">Formação</h3>' +
@@ -252,18 +253,86 @@ BF.ui.playMatch = function (match, S, onDone) {
         };
       });
     }
+    // Estado de selecao para SWAP por CLIQUE (mobile-friendly).
+    // Fluxo: clica num jogador (campo OU banco) -> marca como 'picked'.
+    // Clica num segundo jogador -> faz a substituicao.
+    //   - bench -> pitch slot: reserva entra naquele slot
+    //   - pitch -> pitch:      troca de posicao entre os dois titulares
+    //   - bench -> bench:      apenas re-seleciona o segundo
+    let pickedId = 0, pickedSrc = null, pickedSlotIdx = -1;
+    function clearPicked() {
+      pickedId = 0; pickedSrc = null; pickedSlotIdx = -1;
+      box.querySelectorAll('.picked').forEach(function (el) { el.classList.remove('picked'); });
+      const hint = box.querySelector('#subHint'); if (hint) hint.textContent = '';
+    }
+    function setPicked(id, src, slotIdx, el) {
+      pickedId = id; pickedSrc = src; pickedSlotIdx = (slotIdx == null ? -1 : slotIdx);
+      box.querySelectorAll('.picked').forEach(function (x) { x.classList.remove('picked'); });
+      if (el) el.classList.add('picked');
+      const p = sq.find(function (x) { return x.id === id; });
+      const hint = box.querySelector('#subHint');
+      if (hint && p) hint.textContent = 'Selecionado: ' + p.name + ' \u2014 toque em quem entra/sai no lugar.';
+    }
+    function performSwap(targetSlotIdx, targetId) {
+      // pickedId == quem ja estava selecionado; o usuario tocou agora num
+      // titular (targetSlotIdx, targetId) OU num reserva (targetSlotIdx=-1).
+      if (!pickedId) return;
+      const fromIdx = sel.indexOf(pickedId);
+      // bench -> pitch: entra no slot do alvo (sai o titular do slot)
+      if (pickedSrc === 'bench' && targetSlotIdx >= 0) {
+        sel[targetSlotIdx] = pickedId;
+      }
+      // pitch -> bench (clicou num reserva apos selecionar titular): tira do XI
+      else if (pickedSrc === 'pitch' && targetSlotIdx < 0) {
+        if (fromIdx >= 0) sel[fromIdx] = pickedId === sel[fromIdx] ? 0 : sel[fromIdx];
+        // o reserva alvo entra no slot que ficou vazio
+        if (fromIdx >= 0) sel[fromIdx] = targetId;
+      }
+      // pitch -> pitch: swap entre dois titulares
+      else if (pickedSrc === 'pitch' && targetSlotIdx >= 0) {
+        if (fromIdx < 0) { clearPicked(); return; }
+        const tmp = sel[targetSlotIdx]; sel[targetSlotIdx] = pickedId; sel[fromIdx] = tmp;
+      }
+      // bench -> bench: apenas re-seleciona
+      else if (pickedSrc === 'bench' && targetSlotIdx < 0) {
+        clearPicked();
+        return;
+      }
+      clearPicked();
+      rerenderPitch();
+    }
+
     function bindDrag() {
-      // chips do campo
+      // chips do campo: drag (desktop) + click (mobile/touch)
       box.querySelectorAll('#pPitch .player-chip').forEach(function (b) {
         b.ondragstart = function (e) { dragId = +b.dataset.id; dragSrc = 'pitch'; try { e.dataTransfer.setData('text/plain', String(dragId)); } catch (er) {} };
         b.ondragend = function () { dragId = 0; dragSrc = null; };
+        b.onclick = function (e) {
+          e.preventDefault(); e.stopPropagation();
+          const id = +b.dataset.id;
+          const slot = b.closest('.slot');
+          const slotIdx = slot ? +slot.dataset.slot : -1;
+          if (!pickedId) { setPicked(id, 'pitch', slotIdx, b); return; }
+          if (pickedId === id) { clearPicked(); return; }
+          performSwap(slotIdx, id);
+        };
       });
-      // pick-rows do banco
+      // pick-rows do banco: drag + click
       box.querySelectorAll('#pBench .pick-row').forEach(function (r) {
         r.ondragstart = function (e) { dragId = +r.dataset.id; dragSrc = 'bench'; try { e.dataTransfer.setData('text/plain', String(dragId)); } catch (er) {} };
         r.ondragend = function () { dragId = 0; dragSrc = null; };
+        r.onclick = function (e) {
+          e.preventDefault(); e.stopPropagation();
+          const id = +r.dataset.id;
+          if (!pickedId) { setPicked(id, 'bench', -1, r); return; }
+          if (pickedId === id) { clearPicked(); return; }
+          // se quem estava selecionado eh do banco, troca a selecao
+          if (pickedSrc === 'bench') { setPicked(id, 'bench', -1, r); return; }
+          // titular selecionado + reserva clicado: faz a substituicao
+          performSwap(-1, id);
+        };
       });
-      // slots aceitam drop
+      // slots aceitam drop (desktop) E click vazio (mobile, para entrar num slot vazio)
       box.querySelectorAll('#pPitch .slot').forEach(function (slot) {
         slot.ondragover = function (e) { e.preventDefault(); slot.classList.add('drop-ok'); };
         slot.ondragleave = function () { slot.classList.remove('drop-ok'); };
@@ -273,17 +342,20 @@ BF.ui.playMatch = function (match, S, onDone) {
           const dropped = dragId || +(e.dataTransfer.getData('text/plain') || 0);
           if (!dropped) return;
           if (dragSrc === 'bench') {
-            const cur = sel[slotIdx] || 0;
-            sel[slotIdx] = dropped; // substitui o titular do slot pelo reserva
-            // (cur volta automaticamente para o banco porque calculamos pelo sel)
-            void cur;
+            sel[slotIdx] = dropped;
           } else {
-            // swap dentro do campo
             const fromIdx = sel.indexOf(dropped);
             if (fromIdx < 0) return;
             const tmp = sel[slotIdx]; sel[slotIdx] = dropped; sel[fromIdx] = tmp;
           }
           rerenderPitch();
+        };
+        // click em slot VAZIO completa swap a partir do banco
+        slot.onclick = function (e) {
+          if (e.target.closest('.player-chip')) return; // o handler do chip cuida
+          if (!pickedId) return;
+          const slotIdx = +slot.dataset.slot;
+          if (pickedSrc === 'bench') { sel[slotIdx] = pickedId; clearPicked(); rerenderPitch(); }
         };
       });
     }
