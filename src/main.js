@@ -336,6 +336,33 @@ window.BF = window.BF || {};
         U.flash('Apenas o anfitri\u00e3o salva o jogo.', true);
       }
     };
+    // v10.7: botao "Menu" ao lado do Salvar. Salva (se host) e volta para o
+    // menu inicial. Confirma antes para evitar saidas acidentais.
+    const mb = document.getElementById('menuBtn');
+    if (mb) mb.onclick = function () {
+      const isHost = BF.G.transport && BF.G.transport.role === 'host';
+      const msg = isHost ? 'Salvar o jogo e voltar para o menu inicial?' : 'Sair e voltar para o menu inicial?';
+      if (!confirm(msg)) return;
+      function leave() {
+        try { if (BF.G.transport && BF.G.transport.close) BF.G.transport.close(); } catch (_) {}
+        BF.G.transport = null; BF.G.S = null; BF.G.partyCode = null; BF.G.members = [];
+        BF.me = { clubId: null, name: (BF.api && BF.api.getUser() && BF.api.getUser().name) || 'Voc\u00ea' };
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('setup').classList.remove('hidden');
+        if (BF.authUI && BF.authUI.refreshGames) BF.authUI.refreshGames();
+      }
+      if (isHost && BF.G.transport.requestSave) {
+        U.flash('Salvando antes de sair\u2026');
+        let done = false;
+        const finish = function () { if (done) return; done = true; leave(); };
+        if (BF.G.transport.on) BF.G.transport.on('saved', finish);
+        BF.G.transport.broadcastState(BF.G.S);
+        BF.G.transport.requestSave();
+        setTimeout(finish, 4000); // fallback se relay nao responder
+      } else {
+        leave();
+      }
+    };
     // v10.6: SEM auto-save no beforeunload. Salvamento só acontece quando o
     // usuário clica em Salvar no cartão superior. Se ele cair ou fechar a aba
     // sem salvar, o progresso desde o último Salvar é perdido (alivia o Postgres).

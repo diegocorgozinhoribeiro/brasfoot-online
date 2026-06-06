@@ -124,9 +124,10 @@ BF.ui = BF.ui || {};
     const tb = C.computeTable(s, me.division);
     const pos = tb.findIndex(function (r) { return r.id === me.id; }) + 1;
     const row = tb.find(function (r) { return r.id === me.id; }) || { P: 0 };
-    // v10.6: fallback caso o state esteja vindo do servidor com round indefinido
-    if (s.round == null) s.round = 1;
-    if (s.totalRounds == null) s.totalRounds = 38;
+    // v10.7: fallback robusto caso o state esteja vindo do servidor com
+    // round/totalRounds indefinido (saves antigos da v10.5 sem esses campos).
+    if (s.round == null || isNaN(+s.round)) s.round = 1;
+    if (s.totalRounds == null || isNaN(+s.totalRounds)) s.totalRounds = 38;
     const done = s.round > s.totalRounds;
     const thisRound = done ? [] : gamesForClubInRound(s, me.id, s.round).filter(function (g) { return !g.f.played; });
     const nextG = done ? null : nextGameOf(s, me.id);
@@ -639,6 +640,66 @@ BF.ui = BF.ui || {};
   }
 
   // -------- MERCADO --------
+  // v10.7: agrupa propostas por jogador. Se um mesmo jogador tem 4 propostas,
+  // vira UM cartao consolidado com as 4 ofertas dentro (a mais alta destacada).
+  function groupNegByPlayer(negs) {
+    const groups = {};
+    const order = [];
+    negs.forEach(function (n) {
+      const key = n.playerId != null ? 'p:' + n.playerId : 'n:' + n.playerName;
+      if (!groups[key]) { groups[key] = { playerId: n.playerId, playerName: n.playerName, items: [] }; order.push(key); }
+      groups[key].items.push(n);
+    });
+    return order.map(function (k) {
+      const g = groups[k];
+      // ordena por valor desc — a mais alta primeiro (e marcada como melhor)
+      g.items.sort(function (a, b) { return (b.amount || 0) - (a.amount || 0); });
+      g.bestAmount = g.items.length ? g.items[0].amount : 0;
+      return g;
+    });
+  }
+  function negGroupCard(g) {
+    const s = S();
+    const itemsHtml = g.items.map(function (n) { return negRow(n, n.amount === g.bestAmount && g.items.length > 1); }).join('');
+    const subtitle = g.items.length > 1
+      ? '<span class="muted">' + g.items.length + ' propostas \u2022 melhor oferta <b class="money">' + g.bestAmount.toFixed(1) + ' mi</b></span>'
+      : '<span class="muted">1 proposta</span>';
+    // pega o clube vendedor do primeiro item (todas tem o mesmo, o jogador eh o mesmo)
+    const first = g.items[0];
+    const seller = first ? C.clubById(s, first.toClubId) : null;
+    return '<div class="neg-group" style="border:1px solid var(--border,#2a2a2a);border-radius:10px;padding:10px;background:rgba(255,255,255,0.02);margin-bottom:10px">' +
+      '<div class="neg-group-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">' +
+        '<div><b style="font-size:15px">' + U.esc(g.playerName) + '</b>' + (seller ? ' <span class="muted">\u2022 ' + U.esc(seller.short) + '</span>' : '') + '</div>' +
+        subtitle +
+      '</div>' +
+      '<div class="neg-group-items" style="display:flex;flex-direction:column;gap:6px">' + itemsHtml + '</div>' +
+    '</div>';
+  }
+  function negRow(n, isBest) {
+    const s = S();
+    const buyer = C.clubById(s, n.fromClubId);
+    const statusTxt = { pending: 'Aguardando vendedor', counter: 'Contraproposta recebida', accepted: 'Fechado', rejected: 'Recusado', withdrawn: 'Cancelado' }[n.status];
+    let actions = '';
+    if (needsMyAction(n)) {
+      const side = n.toClubId === myId() ? 'to' : 'from';
+      actions = '<div class="neg-actions" style="display:flex;gap:6px;flex-wrap:wrap">' +
+        '<button class="btn sm primary negAct" data-neg="' + n.id + '" data-side="' + side + '" data-dec="accept">Aceitar</button>' +
+        '<button class="btn sm negAct" data-neg="' + n.id + '" data-side="' + side + '" data-dec="counter">Contrapropor</button>' +
+        '<button class="btn sm red negAct" data-neg="' + n.id + '" data-side="' + side + '" data-dec="' + (side === 'from' ? 'withdraw' : 'reject') + '">' + (side === 'from' ? 'Desistir' : 'Recusar') + '</button>' +
+        '</div>';
+    }
+    const bestStyle = isBest
+      ? 'border:1px solid #22c55e;background:rgba(34,197,94,0.10);box-shadow:0 0 0 1px rgba(34,197,94,0.25) inset'
+      : 'border:1px solid var(--border,#2a2a2a);background:var(--bg-soft,rgba(0,0,0,0.15))';
+    const bestTag = isBest ? '<span class="pill" style="background:#22c55e;color:#022;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">MELHOR</span>' : '';
+    return '<div class="neg-item" style="' + bestStyle + ';border-radius:8px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:200px">' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b>' + U.esc(buyer ? buyer.name : '?') + '</b>' + bestTag + '<span class="neg-status s-' + n.status + '" style="font-size:11px;opacity:0.8">' + statusTxt + '</span></div>' +
+        '<div class="money" style="font-size:16px;font-weight:800;margin-top:2px">' + n.amount.toFixed(1) + ' mi</div>' +
+      '</div>' +
+      actions +
+    '</div>';
+  }
   function negCard(n) {
     const s = S();
     const buyer = C.clubById(s, n.fromClubId), seller = C.clubById(s, n.toClubId);
@@ -733,8 +794,8 @@ BF.ui = BF.ui || {};
       stat('Propostas p/ decidir', inbox.length, inbox.length ? 'neg' : '') +
       stat('Listados (mercado)', listedAll.length, listedAll.length ? 'money' : '') +
       '</div>' +
-      (inbox.length ? '<div class="card"><h2>\ud83d\udce5 Aguardando sua decisão</h2><div class="neg-grid">' + inbox.map(negCard).join('') + '</div></div>' : '') +
-      (active.length ? '<div class="card"><h2>\u23f3 Negociações em andamento</h2><div class="neg-grid">' + active.map(negCard).join('') + '</div></div>' : '') +
+      (inbox.length ? '<div class="card"><h2>\ud83d\udce5 Aguardando sua decisão</h2><div class="neg-grid">' + groupNegByPlayer(inbox).map(negGroupCard).join('') + '</div></div>' : '') +
+      (active.length ? '<div class="card"><h2>\u23f3 Negociações em andamento</h2><div class="neg-grid">' + groupNegByPlayer(active).map(negGroupCard).join('') + '</div></div>' : '') +
       listedHtml +
       '<div class="card"><div class="row-between"><h2 style="margin:0">\ud83d\udd01 Mercado \u2014 contratar jogadores</h2></div>' +
         '<p class="muted" style="margin-bottom:6px">Escolha um jogador (de qualquer divisão) e envie uma proposta. Use os filtros para encontrar reforços por posição, clube, OVR e idade.</p>' +

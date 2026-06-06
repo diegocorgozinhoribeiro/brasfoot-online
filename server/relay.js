@@ -328,10 +328,11 @@ wss.on('connection', (ws) => {
         }
         broadcast(room, m, ws);
       } else if (m.t === 'signal') {
-        // v10.6: broadcast de sinal generico (countdown, etc) para todos os peers,
-        // INCLUINDO o proprio host (echo). Nao toca no state nem no banco.
+        // v10.7: broadcast de sinal generico (countdown, etc) para todos os
+        // peers da sala INCLUINDO o host (broadcast sem 'except' ja inclui
+        // o host). NAO duplica com jsend(ws, m), senao o host recebia o
+        // signal 2x e abria 2 partidas.
         broadcast(room, m);
-        jsend(ws, m); // echo para o host tambem ver o countdown
       } else if (m.t === 'save') {
         // forca gravar JA no Postgres (sem debounce) e confirma ao cliente
         try {
