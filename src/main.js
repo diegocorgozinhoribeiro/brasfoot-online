@@ -46,71 +46,27 @@ window.BF = window.BF || {};
       BF.G.transport.sendAction(action); // guest -> host
     }
   };
+  // v10.5: simplificado — sem sistema de quorum/votacao.
+  // O HOST decide quando iniciar a rodada. Clica e dispara imediatamente.
+  // Guests recebem o novo state via broadcast e a narracao abre automaticamente.
+  // (O modelo de votacao causava travamento se um peer perdia conexao.)
   BF.requestPlayRound = function () {
-    if (isSoloGame()) {
+    if (isAuthority()) {
       BF.dispatch({ type: 'PLAY_ROUND' });
-      return;
+    } else {
+      // Guest nao deveria ter chamado, mas por seguranca pede ao host.
+      U.flash('Apenas o host pode iniciar a rodada.', true);
     }
-    const required = requiredVotes();
-    BF.dispatch({ type: 'REQUEST_PLAY_ROUND', name: BF.me.name || 'Jogador', required: required });
   };
 
-  // Overlay "aguardando jogadores" — mostrado entre o clique em Iniciar rodada
-  // e a narração ao vivo / simulação. Em modo solo dura ~700ms; em party,
-  // mostra a contagem de votos até atingir o mínimo.
+  // v10.5: stub. Mantido para retrocompatibilidade do app.js antigo.
+  // Antes mostrava overlay de quorum; agora só chama onReady direto.
   BF.showRoundWaiting = function (onReady) {
-    const isSolo = isSoloGame();
-    // SOLO: sem overlay de espera. A narração já é uma tela cheia, então
-    // mostrar "1/1" antes só atrasa o jogo. Dispara onReady imediatamente.
-    if (isSolo) {
-      if (typeof onReady === 'function') onReady();
-      return;
-    }
-    const required = requiredVotes();
-    // limpa qualquer overlay residual de rodadas anteriores antes de criar
-    // um novo (a partir da 2a rodada o anterior poderia ainda estar no DOM
-    // dependendo do timing do re-render).
-    document.querySelectorAll('.wait-overlay').forEach(function (el) {
-      if (el.parentNode) el.parentNode.removeChild(el);
-    });
-    const ov = document.createElement('div');
-    ov.className = 'wait-overlay';
-    ov.innerHTML = '<div class="wait-card">' +
-      '<h2>⚽ Iniciando rodada</h2>' +
-      '<div class="wait-sub">Aguardando confirmação dos jogadores…</div>' +
-      '<div class="wait-count"><em id="wcNow">1</em> / <span id="wcTot">' + required + '</span></div>' +
-      '<div class="wait-bar"><i id="wcBar" style="width:' + Math.round(100 / required) + '%"></i></div>' +
-      '<div class="wait-tip">' + (isSolo ? 'Modo solo — único jogador confirmado.' : 'Quando ' + required + ' jogadores confirmarem, a rodada começa.') + '</div>' +
-      '</div>';
-    // Estilo inline garante visibilidade mesmo se houver outro overlay no DOM
-    // (ex.: modal de narracao da partida anterior ainda nao fechado).
-    ov.style.zIndex = '99999';
-    ov.style.display = 'flex';
-    ov.style.visibility = 'visible';
-    ov.style.opacity = '1';
-    document.body.appendChild(ov);
-    void ov.offsetHeight;
-    function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
-    // Party: dispara o pedido e fica observando vote count via S.votes
-    // O quorum é 100% dos membros conectados — ninguém fura fila.
     if (typeof onReady === 'function') onReady();
-    let lastSeenRound = (BF.G.S && BF.G.S.lastRound) ? BF.G.S.lastRound.round : -1;
-    const interval = setInterval(function () {
-      const S = BF.G.S;
-      // ressincroniza o total caso alguém entre/saia da party durante a espera
-      const totalNow = requiredVotes();
-      const votes = (S && S.votes && S.votes.playRound && S.votes.playRound.names) || [];
-      const now = Math.min(totalNow, votes.length || 1);
-      const wnow = ov.querySelector('#wcNow'); if (wnow) wnow.textContent = now;
-      const wtot = ov.querySelector('#wcTot'); if (wtot) wtot.textContent = totalNow;
-      const bar = ov.querySelector('#wcBar'); if (bar) bar.style.width = Math.round(now * 100 / totalNow) + '%';
-      // só fecha quando uma NOVA rodada foi efetivamente jogada (lastRound.round avançou)
-      const curRound = (S && S.lastRound) ? S.lastRound.round : -1;
-      if (curRound > lastSeenRound) { clearInterval(interval); setTimeout(close, 400); }
-    }, 250);
-    // Sem failsafe agressivo: o overlay agora persiste até a rodada começar de verdade.
-    // (em caso de bug, o usuário pode dar F5 e volta no mesmo estado pelo banco)
   };
+
+  // Indica se o usuario atual eh o host (pode iniciar rodadas).
+  BF.canStartRound = function () { return isAuthority(); };
 
   BF.claimClub = function (clubId) {
     BF.me.clubId = clubId;

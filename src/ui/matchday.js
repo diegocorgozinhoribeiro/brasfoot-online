@@ -162,6 +162,8 @@ BF.ui.playMatch = function (match, S, onDone) {
     paused = true;
     clearInterval(timer);
     const clubId = myId;
+    // v10.5: sempre ler do BF.G.S (o S capturado fica desatualizado entre pausas)
+    S = BF.G.S || S;
     const sq = C.squad(S, clubId);
     if (!clubId || !sq.length || !mySide) {
       line('<b>' + title + '</b> Sem clube controlado nesta partida.');
@@ -171,8 +173,9 @@ BF.ui.playMatch = function (match, S, onDone) {
     let formKey = (S.formations && S.formations[clubId]) || '4-4-2';
     let form = D.FORMATIONS[formKey] || D.FORMATIONS['4-4-2'];
     const slotsPos0 = form.slots;
-    const baseIds0 = ((S.lineups && S.lineups[clubId]) ? S.lineups[clubId] : C.autoLineup(sq, form.need).map(function (p) { return p.id; }))
-      .filter(function (id) { return sq.find(function (x) { return x.id === id; }); });
+    // estado original ANTES das mudancas (para detectar quem saiu)
+    const origLineup = (S.lineups && S.lineups[clubId]) ? S.lineups[clubId].slice() : C.autoLineup(sq, form.need).map(function (p) { return p.id; });
+    const baseIds0 = origLineup.filter(function (id) { return sq.find(function (x) { return x.id === id; }); });
     let sel = (BF._buildSlotAligned ? BF._buildSlotAligned(slotsPos0, sq, baseIds0) : baseIds0.slice());
     let dragId = 0, dragSrc = null;
 
@@ -366,11 +369,55 @@ BF.ui.playMatch = function (match, S, onDone) {
     box.querySelector('#subSave').onclick = function () {
       // salva formação (se mudou) e a escalação atualizada (apenas titulares ocupados)
       const orig = (S.formations && S.formations[clubId]) || '4-4-2';
-      if (formKey !== orig) BF.dispatch({ type: 'SET_FORMATION', clubId: clubId, formation: formKey });
+      const formChanged = (formKey !== orig);
+      if (formChanged) BF.dispatch({ type: 'SET_FORMATION', clubId: clubId, formation: formKey });
       const lineup = sel.filter(Boolean);
+      let subsApplied = 0;
       if (lineup.length) {
         BF.dispatch({ type: 'SET_LINEUP', clubId: clubId, lineup: lineup });
-        line('<b>Ajustes salvos.</b> Valem a partir das próximas partidas.', 'md-sub');
+        // v10.5: aplica substituicoes na PARTIDA ATUAL.
+        // Identifica jogadores que SAIRAM (estavam em origLineup mas nao em lineup)
+        // e quem ENTROU (esta em lineup mas nao em origLineup). Eventos futuros
+        // do jogador que saiu sao remapeados para o jogador que entrou.
+        const wentOut = origLineup.filter(function (id) { return lineup.indexOf(id) < 0; });
+        const cameIn  = lineup.filter(function (id) { return origLineup.indexOf(id) < 0; });
+        if (wentOut.length && cameIn.length) {
+          // mapa: outId -> inId (mesmo índice; se sobrar/faltar, cicla)
+          const remap = {};
+          wentOut.forEach(function (outId, i) {
+            const inId = cameIn[i % cameIn.length];
+            remap[outId] = inId;
+          });
+          // re-aponta playerId/assistId de eventos a partir do minuto atual
+          for (let k = idx; k < events.length; k++) {
+            const ev = events[k];
+            if (ev.side !== mySide) continue;
+            if (ev.playerId && remap[ev.playerId]) {
+              const np = sq.find(function (x) { return x.id === remap[ev.playerId]; });
+              if (np) { ev.playerId = np.id; ev.player = np.name; }
+            }
+            if (ev.assistId && remap[ev.assistId]) {
+              const np = sq.find(function (x) { return x.id === remap[ev.assistId]; });
+              if (np) { ev.assistId = np.id; ev.assist = np.name; }
+            }
+          }
+          subsApplied = wentOut.length;
+          // narra cada substituicao no feed da partida
+          wentOut.forEach(function (outId, i) {
+            const inId = cameIn[i % cameIn.length];
+            const pOut = sq.find(function (x) { return x.id === outId; });
+            const pIn  = sq.find(function (x) { return x.id === inId; });
+            if (pOut && pIn) {
+              line("<span class='md-min'>" + minute + "'</span> \ud83d\udd04 Substitui\u00e7\u00e3o em " + U.esc(C.clubById(BF.G.S, clubId).name) + ": entra <b>" + U.esc(pIn.name) + "</b>, sai <b>" + U.esc(pOut.name) + "</b>.", 'md-sub');
+            }
+          });
+        }
+      }
+      if (formChanged) {
+        line("<span class='md-min'>" + minute + "'</span> \ud83d\udcdc Mudan\u00e7a de forma\u00e7\u00e3o para <b>" + formKey + "</b>.", 'md-sub');
+      }
+      if (!subsApplied && !formChanged) {
+        line('<b>Nenhuma altera\u00e7\u00e3o feita.</b>', 'md-sub');
       }
       document.body.removeChild(box); paused = false; startTimer();
     };

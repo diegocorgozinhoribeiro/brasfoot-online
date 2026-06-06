@@ -389,6 +389,27 @@ BF.ui = BF.ui || {};
       '<div class="balance">' + balance + '</div>' +
       '<div class="lineup-actions"><button class="btn sm" id="autoLineup">Preencher automático</button><button class="btn sm" id="clearLineup">Limpar</button>' +
       '<button class="btn primary" id="saveLineup" ' + (filled === slotsPos.length ? '' : 'disabled') + '>Salvar escalação</button></div>' +
+      // v10.5: presets de escalação (Titular, Reserva, etc.) por usuário+clube em localStorage.
+      (function () {
+        const presets = BF.presets ? BF.presets.list(myId()) : [];
+        return '<div class="lineup-presets" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #1f2937;border-radius:8px">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b>\ud83d\udcc1 Esquemas salvos</b><span class="muted" style="font-size:12px">Salve sua escalação atual com um nome (ex: "Titular", "Reserva", "Ofensivo") e carregue depois com 1 clique.</span></div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">' +
+            '<input id="presetName" placeholder="Nome do esquema" maxlength="30" style="flex:1;min-width:140px;padding:6px 10px;background:#111827;border:1px solid #374151;border-radius:6px;color:#e5e7eb">' +
+            '<button class="btn sm primary" id="presetSave">\ud83d\udcbe Salvar atual</button>' +
+          '</div>' +
+          (presets.length
+            ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + presets.map(function (p) {
+                return '<div class="preset-chip" style="display:flex;align-items:center;gap:4px;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:4px 8px">' +
+                  '<button class="btn xs" data-preset-load="' + U.esc(p.name) + '" style="background:transparent;border:0;color:#22c55e;cursor:pointer;font-weight:600">\u25b6 ' + U.esc(p.name) + '</button>' +
+                  '<span class="muted" style="font-size:11px">' + U.esc(p.formation) + '</span>' +
+                  '<button class="btn xs" data-preset-del="' + U.esc(p.name) + '" title="Excluir" style="background:transparent;border:0;color:#ef4444;cursor:pointer">\u00d7</button>' +
+                '</div>';
+              }).join('') + '</div>'
+            : '<div class="muted" style="font-size:12px">Nenhum esquema salvo ainda. Monte sua escalação acima, escreva um nome e clique em Salvar atual.</div>'
+          ) +
+        '</div>';
+      })() +
       (counts.GOL < 1 ? '<p class="warn-txt">\u26a0\ufe0f Escale ao menos 1 goleiro.</p>' : '') +
       '<div class="pick-list">' + rows + '</div></div>';
   }
@@ -827,6 +848,46 @@ BF.ui = BF.ui || {};
     };
     const cl = $('#clearLineup'); if (cl) cl.onclick = function () { BF._lineupSel = (BF._lineupSel || []).map(function () { return 0; }); U.render(); };
     const sl = $('#saveLineup'); if (sl) sl.onclick = function () { BF.dispatch({ type: 'SET_LINEUP', clubId: myId(), lineup: (BF._lineupSel || []).filter(Boolean) }); U.flash('Escalação salva!'); };
+    // v10.5: handlers de presets
+    const presetSaveBtn = $('#presetSave');
+    if (presetSaveBtn) presetSaveBtn.onclick = function () {
+      const nameEl = $('#presetName'); const name = (nameEl && nameEl.value || '').trim();
+      if (!name) { U.flash('Digite um nome para o esquema.', true); return; }
+      const lineup = (BF._lineupSel || []).filter(Boolean);
+      if (!lineup.length) { U.flash('Monte a escalação antes de salvar.', true); return; }
+      const fk = currentFormation(myId());
+      if (BF.presets) BF.presets.save(myId(), name, fk, lineup);
+      U.flash('Esquema "' + name + '" salvo!');
+      U.render();
+    };
+    document.querySelectorAll('[data-preset-load]').forEach(function (b) {
+      b.onclick = function () {
+        const name = b.getAttribute('data-preset-load');
+        const p = BF.presets ? BF.presets.get(myId(), name) : null;
+        if (!p) { U.flash('Esquema não encontrado.', true); return; }
+        const sq = C.squad(S(), myId());
+        const form = D.FORMATIONS[p.formation] || D.FORMATIONS['4-4-2'];
+        // filtra ids que ainda existem no elenco (jogadores podem ter sido vendidos)
+        const validIds = p.lineup.filter(function (id) { return sq.find(function (x) { return x.id === id; }); });
+        BF._lineupSel = BF._buildSlotAligned(form.slots, sq, validIds);
+        BF._lineupSelForm = p.formation;
+        BF.dispatch({ type: 'SET_FORMATION', clubId: myId(), formation: p.formation });
+        if (validIds.length === form.need.length) {
+          BF.dispatch({ type: 'SET_LINEUP', clubId: myId(), lineup: validIds });
+        }
+        U.flash('Esquema "' + name + '" carregado' + (validIds.length < p.lineup.length ? ' (alguns jogadores não estão mais no elenco)' : '') + '.');
+        U.render();
+      };
+    });
+    document.querySelectorAll('[data-preset-del]').forEach(function (b) {
+      b.onclick = function () {
+        const name = b.getAttribute('data-preset-del');
+        if (!confirm('Excluir o esquema "' + name + '"?')) return;
+        if (BF.presets) BF.presets.remove(myId(), name);
+        U.flash('Esquema excluído.');
+        U.render();
+      };
+    });
     document.querySelectorAll('.tac').forEach(function (b) { b.onclick = function () {
       // Atualiza visual imediatamente (evita qualquer race com render)
       document.querySelectorAll('.tac').forEach(function (x) { x.classList.toggle('sel', x === b); });
