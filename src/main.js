@@ -5,7 +5,7 @@ window.BF = window.BF || {};
 
 (function () {
   const C = BF.core, U = BF.ui;
-  const KEY = 'brasfoot_mgr_v7';
+  const KEY = 'brasfoot_mgr_v8';
   BF.G = { S: null, transport: null, members: [], partyCode: null, watchedRound: 0 };
   BF.me = { clubId: null, name: 'Você' };
   BF._marketClub = 0;
@@ -236,13 +236,21 @@ window.BF = window.BF || {};
   };
 
   // -------- telas de inicio --------
-  function showSetup() {
+  async function showSetup() {
+    // Carrega as ligas/regioes reais do Postgres (via /api/regions) antes de
+    // montar os seletores. Sem isso, nenhuma regiao aparece.
+    try { await BF.data.ensureRegionsLoaded(); }
+    catch (e) { U.flash('Nao consegui carregar as ligas do servidor: ' + (e && e.message || e), true); }
     // seletor de clube (modo solo) - com divisao
     const pick = document.getElementById('soloClubs');
     let chosen = null;
-    let soloDiv = 1;
+    let soloRegionId = 'BR';
+    let soloLeagueId = 'BR1';
+    function firstPlayableId() { const rs = (BF.data.REGIONS || []); for (let i = 0; i < rs.length; i++) if (BF.data.regionPlayable(rs[i].id)) return rs[i].id; return rs[0] ? rs[0].id : 'BR'; }
+    function regionOptions() { return (BF.data.REGIONS || []).map(function (r) { const ok = BF.data.regionPlayable(r.id); return '<option value="' + r.id + '"' + (ok ? '' : ' disabled') + '>' + r.flag + ' ' + r.name + (ok ? '' : ' (em breve)') + '</option>'; }).join(''); }
     function renderSoloClubs() {
-      pick.innerHTML = BF.data.CLUBS.filter(function (c) { return c.division === soloDiv; }).map(function (c) {
+      const list = (BF.data.clubsInRegion ? BF.data.clubsInRegion(soloRegionId) : BF.data.CLUBS).filter(function (c) { return soloLeagueId ? c.leagueId === soloLeagueId : true; }).slice().sort(function (a, b) { return b.strength - a.strength; });
+      pick.innerHTML = list.map(function (c) {
         return '<button class="club-opt" data-id="' + c.id + '">' + BF.ui.badge(c, 'lg') + '<div><div class="nm">' + c.name + '</div><div class="st">' + c.city + ' \u2022 força ' + c.strength + '</div></div></button>';
       }).join('');
       pick.querySelectorAll('.club-opt').forEach(function (b) {
@@ -254,13 +262,30 @@ window.BF = window.BF || {};
         };
       });
     }
-    const dsw = document.getElementById('soloDivSwitch');
-    if (dsw) dsw.querySelectorAll('button').forEach(function (b) {
-      b.onclick = function () {
-        dsw.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
-        soloDiv = +b.dataset.div; renderSoloClubs();
-      };
-    });
+    function buildLeagueSwitch() {
+      const region = BF.data.regionById(soloRegionId);
+      const sw = document.getElementById('soloLeagueSwitch');
+      if (!region || !sw) return;
+      const lgs = region.leagues || [];
+      soloLeagueId = lgs[0] ? lgs[0].id : null;
+      sw.style.display = lgs.length > 1 ? '' : 'none';
+      sw.innerHTML = lgs.map(function (l, i) { return '<button class="' + (i === 0 ? 'active' : '') + '" data-lg="' + l.id + '">' + l.name + '</button>'; }).join('');
+      sw.querySelectorAll('button').forEach(function (b) {
+        b.onclick = function () {
+          sw.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+          soloLeagueId = b.dataset.lg; chosen = null; document.getElementById('soloStart').disabled = true; renderSoloClubs();
+        };
+      });
+    }
+    const soloRegionSel = document.getElementById('soloRegion');
+    if (soloRegionSel) {
+      soloRegionSel.innerHTML = regionOptions();
+      soloRegionId = firstPlayableId(); soloRegionSel.value = soloRegionId;
+      soloRegionSel.onchange = function () { soloRegionId = this.value; chosen = null; document.getElementById('soloStart').disabled = true; buildLeagueSwitch(); renderSoloClubs(); };
+    } else { soloRegionId = firstPlayableId(); }
+    const hostRegionSel = document.getElementById('hostRegion');
+    if (hostRegionSel) { hostRegionSel.innerHTML = regionOptions(); hostRegionSel.value = firstPlayableId(); }
+    buildLeagueSwitch();
     renderSoloClubs();
 
     // alternar paineis
@@ -272,12 +297,16 @@ window.BF = window.BF || {};
     });
 
     // SOLO -- agora cria jogo online (host com mode='solo') para salvar na nuvem
-    document.getElementById('soloStart').onclick = function () {
+    document.getElementById('soloStart').onclick = async function () {
       if (!chosen) return;
       const u = BF.api && BF.api.getUser(); if (!u) { BF.authUI.show(); return; }
+      const btn = document.getElementById('soloStart');
+      btn.disabled = true; U.flash('Carregando elencos reais\u2026');
+      try { await BF.data.ensureWorldLoaded(soloRegionId); }
+      catch (e) { U.flash('Falha ao carregar dados da regiao: ' + (e && e.message || e), true); btn.disabled = false; return; }
       BF.me = { clubId: chosen, name: u.name };
       const code = 'SOLO-' + (u.id || 'X') + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
-      let S0 = C.buildWorld(code);
+      let S0 = C.buildWorld(code, soloRegionId);
       S0 = C.applyAction(S0, { type: 'CLAIM_CLUB', clubId: chosen, name: u.name });
       BF.G.S = S0;
       BF.G.partyCode = code;
@@ -287,11 +316,16 @@ window.BF = window.BF || {};
     };
 
     // CRIAR PARTY -- agora persiste na nuvem
-    document.getElementById('hostStart').onclick = function () {
+    document.getElementById('hostStart').onclick = async function () {
       const u = BF.api && BF.api.getUser(); if (!u) { BF.authUI.show(); return; }
+      const hostRegionId = (document.getElementById('hostRegion') || {}).value || 'BR';
+      const btn = document.getElementById('hostStart');
+      btn.disabled = true; U.flash('Carregando elencos reais\u2026');
+      try { await BF.data.ensureWorldLoaded(hostRegionId); }
+      catch (e) { U.flash('Falha ao carregar dados da regiao: ' + (e && e.message || e), true); btn.disabled = false; return; }
       const code = C.partyCode();
       BF.me = { clubId: null, name: u.name };
-      const S0 = C.buildWorld(code);
+      const S0 = C.buildWorld(code, hostRegionId);
       BF.G.S = S0;
       BF.G.partyCode = code;
       wire(makeWs({ code: code, host: true, mode: 'party', initialState: S0 }));

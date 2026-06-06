@@ -56,7 +56,8 @@
     <!-- SOLO -->
     <div class="mode-panel" data-panel="solo">
       <p class="panel-hint">Escolha o clube que você vai comandar:</p>
-      <div class="div-switch" id="soloDivSwitch"><button class="active" data-div="1">Série A</button><button data-div="2">Série B</button></div>
+      <label class="fld">País / Região<select id="soloRegion"></select></label>
+      <div class="div-switch" id="soloLeagueSwitch"><button class="active" data-div="1">Série A</button><button data-div="2">Série B</button></div>
       <div id="soloClubs" class="club-pick scroll"></div>
       <button class="btn primary big" id="soloStart" disabled>Começar carreira</button>
     </div>
@@ -64,6 +65,7 @@
     <!-- CRIAR PARTY -->
     <div class="mode-panel hidden" data-panel="host">
       <p class="panel-hint">Crie uma sala, compartilhe o código e cada amigo assume um time. Seu nome vem do login.</p>
+      <label class="fld">País / Região da party<select id="hostRegion"></select></label>
       <button class="btn primary big" id="hostStart">Criar party</button>
       <p class="tiny">A party fica salva na sua conta. Você pode fechar o navegador e continuar amanhã — os convidados só entram quando você estiver online.</p>
     </div>
@@ -107,6 +109,8 @@
 
 <!-- ============ SCRIPTS (ordem importa: classic scripts, sem modulos) ============ -->
 <script src="src/data/clubs.js"></script>
+<script src="src/data/regions.js"></script>
+<script src="src/data/provider.js"></script>
 <script src="src/data/realPlayers.js"></script>
 <script src="src/core/rng.js"></script>
 <script src="src/core/players.js"></script>

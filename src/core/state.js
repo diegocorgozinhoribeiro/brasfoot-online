@@ -15,8 +15,43 @@ BF.core = BF.core || {};
   const C = BF.core, D = BF.data;
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-  C.clubById = function (S, id) { return S.clubs.find(function (c) { return c.id === id; }); };
-  C.squad = function (S, id) { return S.players.filter(function (p) { return p.clubId === id; }); };
+  // ---- Indice O(1) por estado (performance p/ milhares de jogadores) ----
+  // Mapas clubById/byClub/byId construidos uma vez por instancia de S e
+  // reaproveitados. Invalida quando: o array de clubs/players e' reatribuido
+  // (mudanca de identidade ou tamanho) OU quando S.__sv muda (transferencia
+  // altera clubId in-place). Guardado como propriedade NAO enumeravel para
+  // nao inchar saves/broadcasts nem sobreviver ao clone do applyAction.
+  function buildIndex(S) {
+    var cb = {}, bc = {}, bi = {};
+    var clubs = S.clubs || [], players = S.players || [];
+    for (var i = 0; i < clubs.length; i++) cb[clubs[i].id] = clubs[i];
+    for (var j = 0; j < players.length; j++) {
+      var p = players[j];
+      bi[p.id] = p;
+      (bc[p.clubId] || (bc[p.clubId] = [])).push(p);
+    }
+    var cache = {
+      clubById: cb, byClub: bc, byId: bi,
+      clubsRef: clubs, clubsLen: clubs.length,
+      playersRef: players, playersLen: players.length,
+      sv: S.__sv || 0
+    };
+    try { Object.defineProperty(S, '__idx', { value: cache, enumerable: false, writable: true, configurable: true }); }
+    catch (e) { S.__idx = cache; }
+    return cache;
+  }
+  function idx(S) {
+    var c = S.__idx;
+    if (c && c.clubsRef === S.clubs && c.clubsLen === S.clubs.length &&
+        c.playersRef === S.players && c.playersLen === S.players.length &&
+        c.sv === (S.__sv || 0)) return c;
+    return buildIndex(S);
+  }
+  C._index = idx;
+  C.clubById = function (S, id) { return idx(S).clubById[id]; };
+  // squad retorna uma COPIA (callers podem ordenar/mutar o array retornado).
+  C.squad = function (S, id) { var a = idx(S).byClub[id]; return a ? a.slice() : []; };
+  C.playerById = function (S, id) { return idx(S).byId[id]; };
   C.divClubs = function (S, div) { return S.clubs.filter(function (c) { return c.division === div; }); };
 
   // ---- Formacao do clube ----
@@ -162,17 +197,42 @@ BF.core = BF.core || {};
   };
 
   // ---- Construcao do mundo ----
-  // Calendário único: cada rodada possui apenas UM torneio (Brasileirão, Lib/Sula
-  // ou Copa do Brasil). As rodadas de copa são intercaladas às 38 rodadas de liga.
+  // Calendario de copas ADAPTATIVO: 7 rodadas continentais + 5 da copa nacional,
+  // na mesma ordem cronologica do calendario classico, mas espalhadas conforme
+  // o tamanho da liga (L rodadas). Assim regioes menores tambem completam as
+  // copas sem travar.
+  function cupSchedule(L) {
+    const order = ['continental','copaBrasil','continental','continental','copaBrasil','continental','copaBrasil','continental','copaBrasil','continental','copaBrasil','continental'];
+    const total = order.length; // 12 eventos de copa
+    const totalRounds = L + total;
+    const gap = totalRounds / (total + 1);
+    const cont = [], copa = [];
+    const used = {};
+    let last = 0;
+    for (let i = 0; i < total; i++) {
+      let r = Math.round((i + 1) * gap);
+      if (r <= last) r = last + 1;
+      while (used[r]) r++;
+      if (r > totalRounds) r = totalRounds;
+      used[r] = 1; last = r;
+      if (order[i] === 'continental') cont.push(r); else copa.push(r);
+    }
+    return { continentalRounds: cont, copaBrasilRounds: copa };
+  }
+
+  // Calendario unico: cada rodada possui apenas UM torneio (liga, copa
+  // continental ou copa nacional).
   function buildAllFixtures(S) {
     const d1 = C.divClubs(S, 1).map(function (c) { return c.id; });
     const d2 = C.divClubs(S, 2).map(function (c) { return c.id; });
     const fx1 = C.buildFixtures(d1).map(function (f) { f.div = 1; f.lr = f.round; return f; });
     const fx2 = C.buildFixtures(d2).map(function (f) { f.div = 2; f.lr = f.round; return f; });
-    const leagueRoundsCount = Math.max.apply(null, fx1.concat(fx2).map(function (f) { return f.lr; }));
-    // Rodadas globais reservadas para copas (mesmo índice para LIB e SULA).
-    const continentalRounds = [3, 7, 11, 15, 22, 30, 38];
-    const copaBrasilRounds = [5, 13, 20, 27, 35];
+    const allLr = fx1.concat(fx2).map(function (f) { return f.lr; });
+    const leagueRoundsCount = allLr.length ? Math.max.apply(null, allLr) : 1;
+    // Rodadas globais reservadas para copas (mesmo indice para as continentais).
+    const sched = cupSchedule(leagueRoundsCount);
+    const continentalRounds = sched.continentalRounds;
+    const copaBrasilRounds = sched.copaBrasilRounds;
     const cupRoundsSet = {};
     continentalRounds.forEach(function (r) { cupRoundsSet[r] = 'continental'; });
     copaBrasilRounds.forEach(function (r) { cupRoundsSet[r] = 'copaBrasil'; });
@@ -195,19 +255,40 @@ BF.core = BF.core || {};
     };
   }
 
-  C.buildWorld = function (seed) {
+  C.buildWorld = function (seed, regionId) {
+    const region = (D.regionById && D.regionById(regionId)) || (D.REGIONS && D.REGIONS[0]) || null;
+    regionId = region ? region.id : 'BR';
     const rng = C.makeRng(C.hashSeed(seed));
-    const clubs = D.CLUBS.concat(D.CONTINENTAL_CLUBS || []).map(function (c) { return Object.assign({}, c); });
-    const players = C.genAllPlayers(clubs, rng);
+    // Apenas a regiao ativa vira liga(s) simulada(s). Os clubes das outras
+    // regioes entram SOB DEMANDA (copas continentais + mercado) via
+    // ensureCompetitionClubs -> lazy-load, melhor performance ao escalar.
+    // Aplica os rotulos de copa da confederacao da regiao ANTES de montar as
+    // copas, para que toda a UI mostre os nomes corretos (Libertadores/UCL...).
+    if (region && D.applyConfederationCupLabels) D.applyConfederationCupLabels(region.confederation, region);
+    let baseClubs;
+    if (region && D.clubsInRegion) {
+      baseClubs = D.clubsInRegion(regionId).map(function (c) {
+        const lg = (region.leagues || []).filter(function (l) { return String(l.id) === String(c.leagueId); })[0] || (region.leagues || [])[0];
+        const division = (lg && lg.division) || c.division || 1;
+        return Object.assign({}, c, { division: division, continental: false });
+      });
+    } else {
+      baseClubs = (D._regionClubs || []).map(function (c) { return Object.assign({}, c); });
+    }
+    const players = C.genAllPlayers(baseClubs, rng);
     const S = {
-      seed: seed, season: 1, year: 2026, round: 1, totalRounds: 1,
-      clubs: clubs, players: players, fixtures: [],
+      seed: seed, regionId: regionId, season: 1, year: 2026, round: 1, totalRounds: 1,
+      clubs: baseClubs, players: players, fixtures: [],
       history: [], controlled: {}, userClubs: {}, negotiations: [], lastRound: null, feed: [], negId: 1,
       lineups: {}, tactics: {}, formations: {}, boards: {}, fired: {}, votes: {},
       signings: {}, cups: {}, cupSlots: null, nextCupSlots: null
     };
-    buildAllFixtures(S);
-    if (C.prepareSeasonCups) C.prepareSeasonCups(S);
+    // Convidados de partidas online podem montar o mundo antes do estado
+    // chegar do anfitriao; sem clubes carregados, pula calendario/copas.
+    if (baseClubs.length) {
+      buildAllFixtures(S);
+      if (C.prepareSeasonCups) C.prepareSeasonCups(S);
+    }
     return S;
   };
 
@@ -259,7 +340,7 @@ BF.core = BF.core || {};
       const res = C.simulateMatch(home, away, rng);
       f.hg = res.hg; f.ag = res.ag; f.played = true; f.upset = res.upset;
       res.scorers.home.concat(res.scorers.away).forEach(function (pid) {
-        const p = S.players.find(function (x) { return x.id === pid; }); if (p) p.goals++;
+        const p = C.playerById(S, pid); if (p) p.goals++;
       });
       matches.push({ homeId: f.homeId, awayId: f.awayId, hg: res.hg, ag: res.ag, upset: res.upset, div: f.div, comp: 'league', events: res.events, stats: res.stats });
       if (res.upset) S.feed.unshift('ZEBRA! ' + C.clubById(S, f.homeId).name + ' ' + res.hg + ' x ' + res.ag + ' ' + C.clubById(S, f.awayId).name + ' (rod. ' + r + ')');
@@ -282,7 +363,7 @@ BF.core = BF.core || {};
   function endSeason(S) {
     if (C.ensureSeasonCups) C.ensureSeasonCups(S);
     const t1 = C.computeTable(S, 1), t2 = C.computeTable(S, 2);
-    const champ = C.clubById(S, t1[0].id); champ.titles++;
+    const champ = t1[0] ? C.clubById(S, t1[0].id) : null; if (champ) champ.titles++;
     const art = S.players.slice().sort(function (a, b) { return b.goals - a.goals; })[0];
     const cupWinners = C.cupWinners ? C.cupWinners(S) : {};
     const nextCupSlots = C.computeNextCupSlots ? C.computeNextCupSlots(S, t1, t2) : null;
@@ -305,14 +386,15 @@ BF.core = BF.core || {};
       }
     });
 
-    // Acesso e rebaixamento
-    const releg = t1.slice(-4).map(function (r) { return r.id; });
-    const promo = t2.slice(0, 4).map(function (r) { return r.id; });
-    releg.forEach(function (id) { C.clubById(S, id).division = 2; });
-    promo.forEach(function (id) { C.clubById(S, id).division = 1; });
+    // Acesso e rebaixamento (apenas quando a regiao tem 2a divisao)
+    const hasDiv2 = C.divClubs(S, 2).length > 0;
+    const releg = hasDiv2 ? t1.slice(-4).map(function (r) { return r.id; }) : [];
+    const promo = hasDiv2 ? t2.slice(0, 4).map(function (r) { return r.id; }) : [];
+    releg.forEach(function (id) { const c = C.clubById(S, id); if (c) c.division = 2; });
+    promo.forEach(function (id) { const c = C.clubById(S, id); if (c) c.division = 1; });
 
     S.history.unshift({
-      year: S.year, championId: t1[0].id, championBId: t2[0].id,
+      year: S.year, championId: t1[0] ? t1[0].id : null, championBId: t2[0] ? t2[0].id : null,
       promoted: promo, relegated: releg, cupWinners: cupWinners, cupSlots: nextCupSlots,
       artil: art ? { name: art.name, goals: art.goals, clubId: art.clubId } : null
     });
@@ -322,7 +404,9 @@ BF.core = BF.core || {};
       const sulNames = nextCupSlots.sulamericana.map(function (id) { const c = C.clubById(S, id); return c ? c.short : ''; }).filter(Boolean).join(', ');
       S.feed.unshift('VAGAS ' + (S.year + 1) + ': Libertadores (' + libNames + '); Sul-Americana (' + sulNames + ').');
     }
-    S.feed.unshift('FIM DA TEMPORADA ' + S.year + ': ' + champ.name + ' campeão da Série A; ' + C.clubById(S, t2[0].id).name + ' campeão da Série B.');
+    const champBClub = t2[0] ? C.clubById(S, t2[0].id) : null;
+    const champBName = champBClub ? champBClub.name : null;
+    S.feed.unshift('FIM DA TEMPORADA ' + S.year + ': ' + (champ ? champ.name : '-') + ' campeão' + (champBName ? ('; ' + champBName + ' campeão da 2ª divisão.') : '.'));
   }
 
   C.nextSeason = function (S) {

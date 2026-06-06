@@ -27,6 +27,7 @@ BF.core = BF.core || {};
     // Reseta o estado do jogador ao mudar de clube: sai como recem-contratado,
     // fora da lista de negociacao, sem gols na temporada e energia cheia.
     p.clubId = buyer.id;
+    S.__sv = (S.__sv || 0) + 1; // invalida o indice por-clube (jogador mudou de clube)
     p.goals = 0;
     p.listed = false;
     p.energy = 100;

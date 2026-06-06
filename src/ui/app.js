@@ -35,11 +35,23 @@ BF.ui = BF.ui || {};
   }
   function enColor(p) { const e = C.energyOf(p); return e >= 70 ? 'var(--green)' : (e >= 40 ? 'var(--gold)' : 'var(--red)'); }
   // Metadados da competicao de um jogo (rotulo + classe de cor)
+  function curRegion() {
+    var st = S(); if (!st) return null;
+    return (D.regionById && D.regionById(st.regionId)) || null;
+  }
+  function leagueLabel(div) {
+    var rg = curRegion();
+    if (rg && rg.leagues && rg.leagues.length) {
+      var lg = rg.leagues.filter(function (l) { return l.division === (div || 1); })[0] || rg.leagues[0];
+      if (lg) return lg.name;
+    }
+    return div === 2 ? 'Série B' : 'Série A';
+  }
   function compMeta(g) {
-    if (g.kind === 'league') return { label: 'Brasileirão • ' + (g.div === 2 ? 'Série B' : 'Série A'), cls: 'comp-green' };
-    if (g.kind === 'copaBrasil') return { label: 'Copa do Brasil', cls: 'comp-blue' };
-    if (g.kind === 'libertadores') return { label: 'Libertadores', cls: 'comp-red' };
-    if (g.kind === 'sulamericana') return { label: 'Sul-Americana', cls: 'comp-red' };
+    if (g.kind === 'league') return { label: leagueLabel(g.div), cls: 'comp-green' };
+    if (g.kind === 'copaBrasil') return { label: cupName('copaBrasil'), cls: 'comp-blue' };
+    if (g.kind === 'libertadores') return { label: cupName('libertadores'), cls: 'comp-red' };
+    if (g.kind === 'sulamericana') return { label: cupName('sulamericana'), cls: 'comp-red' };
     return { label: 'Jogo', cls: '' };
   }
   // Jogos de um clube numa rodada (liga + copas)
@@ -571,9 +583,9 @@ BF.ui = BF.ui || {};
       '</div>' +
       '<div class="card"><h2>Chaveamento</h2>' + groupsHtml + stageHtml + '</div>' +
       '<div class="card"><h2>Vagas brasileiras desta temporada</h2>' +
-        '<div class="slot-grid"><div><h3>Libertadores</h3>' + clubTags(slots.libertadores, 8) + '</div>' +
-        '<div><h3>Sul-Americana</h3>' + clubTags(slots.sulamericana, 8) + '</div>' +
-        '<div><h3>Copa do Brasil</h3>' + clubTags(slots.copaBrasil, 16) + '</div></div>' +
+        '<div class="slot-grid"><div><h3>' + cupName('libertadores') + '</h3>' + clubTags(slots.libertadores, 8) + '</div>' +
+        '<div><h3>' + cupName('sulamericana') + '</h3>' + clubTags(slots.sulamericana, 8) + '</div>' +
+        '<div><h3>' + cupName('copaBrasil') + '</h3>' + clubTags(slots.copaBrasil, 16) + '</div></div>' +
       '</div>';
   }
 

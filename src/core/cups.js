@@ -68,6 +68,19 @@ BF.core = BF.core || {};
   };
 
   function cloneClub(c) { return Object.assign({}, c); }
+  // Maior potencia de 2 <= n (minimo 2). Usado para dimensionar o chaveamento
+  // da copa nacional quando a regiao ativa tem poucos clubes.
+  function pow2AtMost(n) {
+    if (n < 2) return 0;
+    var p = 2;
+    while (p * 2 <= n) p *= 2;
+    return p;
+  }
+  // Vagas reais da copa nacional = potencia de 2 <= min(clubes da regiao, slots).
+  function nationalSlots(S, def) {
+    var active = brazilianClubs(S).length;
+    return pow2AtMost(Math.min(active, def.slots));
+  }
   function isBrazilianClub(S, id) {
     const c = C.clubById(S, id);
     return !!(c && !c.continental && c.division > 0);
@@ -140,13 +153,18 @@ BF.core = BF.core || {};
   }
 
   C.ensureCompetitionClubs = function (S) {
-    if (!S || !D.CONTINENTAL_CLUBS) return;
+    if (!S) return;
     S.clubs = S.clubs || [];
     S.players = S.players || [];
+    // Adversarios continentais = clubes de TODAS as outras regioes (lazy-load).
+    const foreign = (D.foreignClubsForRegion)
+      ? D.foreignClubsForRegion(S.regionId || 'BR')
+      : (D.CONTINENTAL_CLUBS || []);
+    if (!foreign.length) return;
     const added = [];
-    D.CONTINENTAL_CLUBS.forEach(function (c) {
+    foreign.forEach(function (c) {
       if (!C.clubById(S, c.id)) {
-        const nc = cloneClub(c);
+        const nc = Object.assign({}, c, { division: 0, continental: true });
         S.clubs.push(nc);
         added.push(nc);
       }
@@ -200,7 +218,7 @@ BF.core = BF.core || {};
   function participantsFor(S, key, usedForeign) {
     const slots = S.cupSlots || C.initialCupSlots(S);
     const def = C.CUP_DEFS[key];
-    if (key === 'copaBrasil') return fillWithBrazilian(S, slots.copaBrasil, def.slots);
+    if (key === 'copaBrasil') return fillWithBrazilian(S, slots.copaBrasil, nationalSlots(S, def));
     const brazil = fillWithBrazilian(S, slots[key], Math.min(6, def.slots));
     const foreign = foreignIds(S, def.slots - brazil.length, key, usedForeign);
     return brazil.concat(foreign).slice(0, def.slots);
@@ -312,7 +330,15 @@ BF.core = BF.core || {};
         short: def.short,
         status: 'active',
         participants: participantsFor(S, key, usedForeign),
-        stages: def.stages.map(function (s) { return Object.assign({}, s); }),
+        // Rodadas das fases vem do calendario ADAPTATIVO (S.calendar), para
+        // funcionar em ligas de qualquer tamanho. Continentais usam o array
+        // continentalRounds; a copa nacional usa copaBrasilRounds.
+        stages: def.stages.map(function (s, i) {
+          var ns = Object.assign({}, s);
+          var rounds = (S.calendar && (def.groups ? S.calendar.continentalRounds : S.calendar.copaBrasilRounds)) || null;
+          if (rounds && rounds[i] != null) ns.round = rounds[i];
+          return ns;
+        }),
         currentStage: 0,
         fixtures: [],
         groups: null,
@@ -345,7 +371,9 @@ BF.core = BF.core || {};
     const wrongSlots = C.CUP_ORDER.some(function (key) {
       const def = C.CUP_DEFS[key];
       const cup = S.cups[key];
-      return def && cup && cup.participants && cup.participants.length !== def.slots;
+      if (!def || !cup || !cup.participants) return false;
+      var expected = def.groups ? def.slots : nationalSlots(S, def);
+      return cup.participants.length !== expected;
     });
     if (groupsMissing || wrongSlots) C.prepareSeasonCups(S);
   };

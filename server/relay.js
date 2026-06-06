@@ -151,6 +151,32 @@ route('DELETE', /^\/games\/([A-Z0-9-]+)$/, async (req, res, match) => {
   send(res, 200, { ok: true });
 });
 
+// --- DADOS (Postgres: ligas, clubes e jogadores reais) ---
+// Carregados sob demanda; require lazy para nao quebrar o boot se o modulo
+// de dados tiver erro. Os handlers propagam e.status (404 sem regiao, 503 sem DB).
+route('GET', /^\/api\/regions$/, async (req, res) => {
+  try {
+    const data = require('./data');
+    const regions = await data.getRegions();
+    send(res, 200, { regions });
+  } catch (e) {
+    send(res, e.status || 500, { error: e.message || 'Erro ao carregar ligas' });
+  }
+});
+
+route('GET', /^\/api\/world$/, async (req, res) => {
+  try {
+    const q = require('url').parse(req.url, true).query || {};
+    const region = String(q.region || '').trim();
+    if (!region) return send(res, 400, { error: 'Parametro region obrigatorio' });
+    const data = require('./data');
+    const world = await data.getWorld(region);
+    send(res, 200, world);
+  } catch (e) {
+    send(res, e.status || 500, { error: e.message || 'Erro ao carregar regiao' });
+  }
+});
+
 // ============================== HTTP dispatch ==============================
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204, null);

@@ -102,5 +102,5 @@
     return fetchJson('/health', { auth: false });
   }
 
-  BF.api = { getBase, setBase, getToken, setToken, getUser, setUser, register, login, me, logout, listGames, deleteGame, isAuthed, ping, toHttp };
+  BF.api = { getBase, setBase, getToken, setToken, getUser, setUser, register, login, me, logout, listGames, deleteGame, isAuthed, ping, toHttp, fetchJson };
 })();
