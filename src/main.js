@@ -17,26 +17,41 @@ window.BF = window.BF || {};
   }
   function loadSave() { try { const r = localStorage.getItem(KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
 
+  // helpers para o modo solo (lobby de 1 jogador, com persistencia online)
+  function isSoloGame() {
+    const t = BF.G.transport;
+    if (!t) return true;
+    if (t.role === 'solo') return true;
+    if (t.mode === 'solo') return true;
+    return false;
+  }
+  function requiredVotes() {
+    const members = (BF.G.members || []);
+    return Math.max(1, members.length || 1);
+  }
+
   // -------- DISPATCH central --------
   BF.dispatch = function (action) {
     if (isAuthority()) {
+      const prevRound = (BF.G.S && BF.G.S.lastRound) ? BF.G.S.lastRound.round : 0;
       BF.G.S = C.applyAction(BF.G.S, action);
       persist();
       if (BF.G.transport && BF.G.transport.role === 'host') BF.G.transport.broadcastState(BF.G.S);
       U.render();
-      if (action.type === 'PLAY_ROUND') maybeWatch();
+      const newRound = (BF.G.S && BF.G.S.lastRound) ? BF.G.S.lastRound.round : 0;
+      // dispara narracao sempre que uma nova rodada eh jogada,
+      // independente do tipo da action (PLAY_ROUND direto OU REQUEST_PLAY_ROUND que bateu quorum)
+      if (newRound > prevRound) maybeWatch();
     } else {
       BF.G.transport.sendAction(action); // guest -> host
     }
   };
   BF.requestPlayRound = function () {
-    const t = BF.G.transport;
-    const members = BF.G.members || [];
-    if (!t || t.role === 'solo') {
+    if (isSoloGame()) {
       BF.dispatch({ type: 'PLAY_ROUND' });
       return;
     }
-    const required = Math.max(1, Math.ceil(Math.max(1, members.length) * 2 / 3));
+    const required = requiredVotes();
     BF.dispatch({ type: 'REQUEST_PLAY_ROUND', name: BF.me.name || 'Jogador', required: required });
   };
 
@@ -44,10 +59,8 @@ window.BF = window.BF || {};
   // e a narração ao vivo / simulação. Em modo solo dura ~700ms; em party,
   // mostra a contagem de votos até atingir o mínimo.
   BF.showRoundWaiting = function (onReady) {
-    const t = BF.G.transport;
-    const members = (BF.G.members || []).length || 1;
-    const isSolo = !t || t.role === 'solo';
-    const required = isSolo ? 1 : Math.max(1, Math.ceil(members * 2 / 3));
+    const isSolo = isSoloGame();
+    const required = isSolo ? 1 : requiredVotes();
     // limpa qualquer overlay residual de rodadas anteriores antes de criar
     // um novo (a partir da 2a rodada o anterior poderia ainda estar no DOM
     // dependendo do timing do re-render).
@@ -93,17 +106,24 @@ window.BF = window.BF || {};
       return;
     }
     // Party: dispara o pedido e fica observando vote count via S.votes
+    // O quorum é 100% dos membros conectados — ninguém fura fila.
     if (typeof onReady === 'function') onReady();
+    let lastSeenRound = (BF.G.S && BF.G.S.lastRound) ? BF.G.S.lastRound.round : -1;
     const interval = setInterval(function () {
       const S = BF.G.S;
-      const votes = (S && S.votes && S.votes.playRound) || [];
-      const now = Math.min(required, votes.length || 1);
+      // ressincroniza o total caso alguém entre/saia da party durante a espera
+      const totalNow = requiredVotes();
+      const votes = (S && S.votes && S.votes.playRound && S.votes.playRound.names) || [];
+      const now = Math.min(totalNow, votes.length || 1);
       const wnow = ov.querySelector('#wcNow'); if (wnow) wnow.textContent = now;
-      const bar = ov.querySelector('#wcBar'); if (bar) bar.style.width = Math.round(now * 100 / required) + '%';
-      if (now >= required || (S && S.lastRound)) { clearInterval(interval); setTimeout(close, 400); }
+      const wtot = ov.querySelector('#wcTot'); if (wtot) wtot.textContent = totalNow;
+      const bar = ov.querySelector('#wcBar'); if (bar) bar.style.width = Math.round(now * 100 / totalNow) + '%';
+      // só fecha quando uma NOVA rodada foi efetivamente jogada (lastRound.round avançou)
+      const curRound = (S && S.lastRound) ? S.lastRound.round : -1;
+      if (curRound > lastSeenRound) { clearInterval(interval); setTimeout(close, 400); }
     }, 250);
-    // Failsafe: fecha em até 6s
-    setTimeout(function () { clearInterval(interval); close(); }, 6000);
+    // Sem failsafe agressivo: o overlay agora persiste até a rodada começar de verdade.
+    // (em caso de bug, o usuário pode dar F5 e volta no mesmo estado pelo banco)
   };
 
   BF.claimClub = function (clubId) {
@@ -205,6 +225,21 @@ window.BF = window.BF || {};
     document.getElementById('app').classList.remove('hidden');
     U.initTabs();
     U.render();
+    // Restaura a aba onde o usuário estava ao dar F5/sair, por jogo
+    BF._tabKey = 'bf_tab_' + (BF.G.partyCode || 'default');
+    try {
+      const last = localStorage.getItem(BF._tabKey);
+      if (last && U.setTab) U.setTab(last);
+    } catch (e) {}
+    // Faz toda troca de aba ser persistida automaticamente
+    if (U.setTab && !U._setTabWrapped) {
+      const orig = U.setTab;
+      U.setTab = function (t) {
+        try { localStorage.setItem(BF._tabKey, t); } catch (e) {}
+        return orig(t);
+      };
+      U._setTabWrapped = true;
+    }
   }
 
   // -------- telas de inicio --------
