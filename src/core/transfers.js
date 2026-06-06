@@ -21,7 +21,10 @@ BF.core = BF.core || {};
     if (!p) { neg.status = 'rejected'; return; }
     const buyer = C.clubById(S, neg.fromClubId), seller = C.clubById(S, neg.toClubId);
     if (buyer.budget < price) { neg.status = 'rejected'; neg.history.push({ by: 'Sistema', action: 'Comprador sem caixa suficiente' }); return; }
-    if (C.squad(S, seller.id).length <= 11) { neg.status = 'rejected'; neg.history.push({ by: 'Sistema', action: 'Vendedor nao pode ficar com menos de 11' }); return; }
+    // Regra do minimo de elenco so vale para clubes JOGAVEIS (da liga). Clubes
+    // estrangeiros/continentais e clubes injetados pelo Mercado (continental:true)
+    // sempre podem vender — sao apenas vendedores de catalogo.
+    if (!seller.continental && C.squad(S, seller.id).length <= 11) { neg.status = 'rejected'; neg.history.push({ by: 'Sistema', action: 'Vendedor nao pode ficar com menos de 11' }); return; }
     buyer.budget = Math.round((buyer.budget - price) * 10) / 10;
     seller.budget = Math.round((seller.budget + price) * 10) / 10;
     // Reseta o estado do jogador ao mudar de clube: sai como recem-contratado,
@@ -69,7 +72,26 @@ BF.core = BF.core || {};
     }
   }
 
+  // Garante que um jogador/clube vindos do CATALOGO do Mercado existam no estado
+  // antes de negociar. A acao OFFER_CREATE carrega playerData/clubData completos,
+  // entao TODOS os peers injetam exatamente os mesmos objetos (determinismo).
+  // Clubes injetados entram como continental (division 0) para nao poluir tabelas.
+  C.ensureMarketEntity = function (S, clubData, playerData) {
+    if (!playerData) return;
+    if (clubData && !C.clubById(S, clubData.id)) {
+      const club = Object.assign({}, clubData, { division: 0, continental: true });
+      S.clubs.push(club);
+      S.__sv = (S.__sv || 0) + 1; // invalida indice (clubs.length mudou)
+    }
+    if (!S.players.find(function (x) { return x.id === playerData.id; })) {
+      const p = Object.assign({ listed: false, goals: 0, energy: 100, contract: 24 }, playerData);
+      S.players.push(p);
+      S.__sv = (S.__sv || 0) + 1; // invalida indice (players.length mudou)
+    }
+  };
+
   C.createOffer = function (S, a) {
+    if (a.playerData) C.ensureMarketEntity(S, a.clubData, a.playerData);
     const p = S.players.find(function (x) { return x.id === a.playerId; });
     if (!p || p.clubId === a.fromClubId) return;
     const amount = Math.round(a.amount * 10) / 10;

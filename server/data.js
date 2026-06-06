@@ -122,4 +122,76 @@ async function getWorld(country) {
   };
 }
 
-module.exports = { getRegions, getWorld };
+// ---- /api/market : catalogo COMPLETO da base (todos os clubes + jogadores)
+// Usado pelo Mercado do jogo: lista todos os clubes (com preferencia de liga
+// no front) e todos os jogadores reais de qualquer pais. Cache em memoria
+// (dados estaticos da base) para nao reconsultar a cada request.
+let _marketCache = null;
+async function getMarket() {
+  if (_marketCache) return _marketCache;
+  const lg = await pool().query(
+    `SELECT id, name, country, confederation, LEAST(level,2) AS division FROM leagues`
+  );
+  const leagueById = {};
+  for (const l of lg.rows) leagueById[String(l.id)] = l;
+
+  const cl = await pool().query(`SELECT id, name, league_id FROM clubs`);
+  const pl = await pool().query(
+    `SELECT player_id, short_name, long_name, positions, main_position,
+            overall, potential, age, nationality, club_id
+     FROM players`
+  );
+  const byClub = groupPlayers(pl.rows);
+
+  const clubs = [];
+  const players = [];
+  for (const cr of cl.rows) {
+    const lgRow = leagueById[String(cr.league_id)] || {};
+    const raw = byClub[cr.id] || [];
+    const mc = mapper.mapClub(cr, raw, {
+      division: lgRow.division || 1,
+      region: lgRow.country || '',
+      country: lgRow.country || '',
+      leagueId: cr.league_id,
+      continental: false,
+    });
+    const club = mc.club;
+    club.leagueName = lgRow.name || '';
+    club.country = lgRow.country || '';
+    club.confederation = lgRow.confederation || '';
+    clubs.push(club);
+
+    // Perfil de mercado por jogador (inclui player_id real = pid estavel).
+    let prof = raw.map((r) => {
+      const ovr = Math.round(Number(r.overall) || 60);
+      const age = Math.round(Number(r.age) || 25);
+      const value = mapper.playerValue(ovr, age);
+      return {
+        pid: Number(r.player_id),
+        name: String(r.short_name || r.long_name || 'Jogador').trim(),
+        pos: mapper.mapPosition(r.positions || r.main_position),
+        ovr: ovr,
+        age: age,
+        value: value,
+        salary: mapper.playerSalary(value),
+        pot: Math.round(Number(r.potential) || ovr),
+        nationality: String(r.nationality || '').trim(),
+        clubId: Number(cr.id),
+        clubName: club.name,
+        clubShort: club.short,
+        leagueId: String(cr.league_id),
+        country: club.country,
+        division: club.division,
+      };
+    });
+    prof.sort((a, b) => b.ovr - a.ovr);
+    prof = prof.slice(0, 30); // espelha o teto de elenco do motor
+    for (const p of prof) players.push(p);
+  }
+
+  clubs.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  _marketCache = { clubs, players };
+  return _marketCache;
+}
+
+module.exports = { getRegions, getWorld, getMarket };

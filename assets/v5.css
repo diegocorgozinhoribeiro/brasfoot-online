@@ -217,3 +217,11 @@
   background:var(--gold); color:#0a0a0a;
   border-color:var(--gold);
 }
+
+/* ---- Mercado: barra de sub-abas (v14) ---- */
+.market-tabs{ display:flex; flex-wrap:wrap; gap:6px; }
+.market-subtab{ background:var(--bg2,#13181f); border:1px solid var(--line,#243042); color:var(--muted,#94a3b8); font-weight:700; font-size:13px; padding:8px 14px; border-radius:10px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; }
+.market-subtab:hover{ color:var(--txt,#e8eef5); border-color:var(--green,#22c55e); }
+.market-subtab.active{ background:var(--green,#22c55e); border-color:var(--green,#22c55e); color:#06210f; }
+.market-subtab .pill{ background:rgba(0,0,0,.18); color:inherit; }
+.market-subtab.active .pill{ background:#06210f; color:#fff; }

@@ -248,7 +248,14 @@ window.BF = window.BF || {};
     let soloLeagueId = 'BR1';
     function firstPlayableId() { const rs = (BF.data.REGIONS || []); for (let i = 0; i < rs.length; i++) if (BF.data.regionPlayable(rs[i].id)) return rs[i].id; return rs[0] ? rs[0].id : 'BR'; }
     function regionOptions() { return (BF.data.REGIONS || []).map(function (r) { const ok = BF.data.regionPlayable(r.id); return '<option value="' + r.id + '"' + (ok ? '' : ' disabled') + '>' + r.flag + ' ' + r.name + (ok ? '' : ' (em breve)') + '</option>'; }).join(''); }
-    function renderSoloClubs() {
+    async function renderSoloClubs() {
+      // BUGFIX: os clubes da regiao so existem depois que o mundo e carregado do
+      // servidor (ensureWorldLoaded popula _regionClubs). Antes disso a lista
+      // ficava vazia e o botao "Comecar" nunca habilitava (nao dava pra criar
+      // partida offline/solo). Carregamos o mundo aqui, com estado de carregando.
+      pick.innerHTML = '<div class="empty" style="padding:14px">Carregando clubes da liga\u2026 \u23f3</div>';
+      try { if (BF.data.ensureWorldLoaded) await BF.data.ensureWorldLoaded(soloRegionId); }
+      catch (e) { pick.innerHTML = '<div class="empty" style="padding:14px">Falha ao carregar clubes: ' + (e && e.message || e) + '</div>'; return; }
       const list = (BF.data.clubsInRegion ? BF.data.clubsInRegion(soloRegionId) : BF.data.CLUBS).filter(function (c) { return soloLeagueId ? c.leagueId === soloLeagueId : true; }).slice().sort(function (a, b) { return b.strength - a.strength; });
       pick.innerHTML = list.map(function (c) {
         return '<button class="club-opt" data-id="' + c.id + '">' + BF.ui.badge(c, 'lg') + '<div><div class="nm">' + c.name + '</div><div class="st">' + c.city + ' \u2022 força ' + c.strength + '</div></div></button>';

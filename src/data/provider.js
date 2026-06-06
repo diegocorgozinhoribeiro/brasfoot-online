@@ -67,6 +67,24 @@ BF.data = BF.data || {};
     return worldPromise[regionId];
   };
 
+  // ---- Mercado: catalogo COMPLETO da base (todos clubes + jogadores reais) ----
+  // Carregado uma vez e cacheado. Usado pela aba Mercado para listar todos os
+  // clubes (qualquer pais) e procurar jogadores de qualquer liga (ex.: Japao).
+  var marketPromise = null;
+  D.ensureMarketLoaded = function () {
+    if (D.MARKET) return Promise.resolve(D.MARKET);
+    if (marketPromise) return marketPromise;
+    marketPromise = getJson('/api/market').then(function (m) {
+      var clubs = (m && m.clubs) || [];
+      var players = (m && m.players) || [];
+      var clubById = {};
+      clubs.forEach(function (c) { clubById[c.id] = c; });
+      D.MARKET = { clubs: clubs, players: players, clubById: clubById };
+      return D.MARKET;
+    }).catch(function (e) { marketPromise = null; throw e; });
+    return marketPromise;
+  };
+
   // Limpa o cache do mundo (usado ao trocar de regiao no menu).
   D.resetWorld = function () {
     D._regionClubs = []; D._continentalClubs = []; D.REAL_PLAYERS_FULL = {}; D._worldRegionId = null; worldPromise = {};

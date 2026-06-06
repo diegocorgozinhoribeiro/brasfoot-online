@@ -177,6 +177,16 @@ route('GET', /^\/api\/world$/, async (req, res) => {
   }
 });
 
+route('GET', /^\/api\/market$/, async (req, res) => {
+  try {
+    const data = require('./data');
+    const market = await data.getMarket();
+    send(res, 200, market);
+  } catch (e) {
+    send(res, e.status || 500, { error: e.message || 'Erro ao carregar mercado' });
+  }
+});
+
 // ============================== HTTP dispatch ==============================
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204, null);

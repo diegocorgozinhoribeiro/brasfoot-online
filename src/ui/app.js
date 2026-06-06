@@ -733,39 +733,63 @@ BF.ui = BF.ui || {};
       '<div class="neg-last">' + U.esc(last.by) + ': ' + U.esc(last.action) + (last.amount ? ' (' + last.amount.toFixed(1) + ' mi)' : '') + '</div>' +
       actions + '</div>';
   }
-  function viewMarket() {
-    const s = S(); const me = myClub();
-    if (!me || !hasClub() || isFired()) return isFired() ? firedBanner() : '<div class="card"><div class="empty">Escolha um clube na aba Party para negociar.</div></div>';
-    const inbox = myNegotiations().filter(needsMyAction);
-    const active = myNegotiations().filter(function (n) { return ['pending', 'counter'].indexOf(n.status) >= 0 && !needsMyAction(n); });
-    const closed = myNegotiations().filter(function (n) { return ['accepted', 'rejected', 'withdrawn'].indexOf(n.status) >= 0; }).slice(0, 6);
+  // ---------- MERCADO (sistema de abas) ----------
+  // Carrega o catalogo completo da base (todos os clubes + jogadores de
+  // qualquer pais) sob demanda; cacheado no provider. Re-renderiza quando pronto.
+  function marketCatalogReady() {
+    if (BF.data.MARKET) return true;
+    if (BF._marketErr) return false;
+    if (!BF._marketLoading && BF.data.ensureMarketLoaded) {
+      BF._marketLoading = true;
+      BF.data.ensureMarketLoaded().then(function () {
+        BF._marketLoading = false; BF._marketErr = null; if (tab === 'market') U.render();
+      }).catch(function (e) {
+        BF._marketLoading = false; BF._marketErr = (e && e.message) || 'Erro ao carregar mercado'; if (tab === 'market') U.render();
+      });
+    }
+    return false;
+  }
 
-    let clubOpts = '<option value="0">Todos os clubes</option>';
-    s.clubs.filter(function (c) { return c.id !== me.id; }).forEach(function (c) { clubOpts += '<option value="' + c.id + '">' + c.name + ' (' + divName(c.division) + ')</option>'; });
+  // Lista de clubes do catalogo: preferencia para a MESMA LIGA do meu clube,
+  // depois mesma regiao (pais), e por fim ordem alfabetica.
+  function marketClubOptions(me) {
+    let opts = '<option value="0">Todos os clubes</option>';
+    const cat = BF.data.MARKET; if (!cat) return opts;
+    const myLeague = String(me.leagueId || ''); const myRegion = me.region || '';
+    const clubs = cat.clubs.filter(function (c) { return c.id !== me.id; }).slice().sort(function (a, b) {
+      const al = (String(a.leagueId) === myLeague) ? 0 : 1;
+      const bl = (String(b.leagueId) === myLeague) ? 0 : 1;
+      if (al !== bl) return al - bl;
+      const ar = (a.country === myRegion) ? 0 : 1;
+      const br = (b.country === myRegion) ? 0 : 1;
+      if (ar !== br) return ar - br;
+      return String(a.name).localeCompare(String(b.name));
+    });
+    const sel = BF._marketClub || 0;
+    clubs.forEach(function (c) {
+      opts += '<option value="' + c.id + '"' + (sel === c.id ? ' selected' : '') + '>' + U.esc(c.name) + ' \u2014 ' + U.esc(c.country || '') + '</option>';
+    });
+    return opts;
+  }
 
-    // ----- Filtros do mercado -----
-    BF._marketFilter = BF._marketFilter || { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40, div: 0 };
+  // Corpo da sub-aba "Mercado": filtros + lista de jogadores do catalogo inteiro.
+  function marketBody(s, me) {
+    if (!marketCatalogReady()) {
+      if (BF._marketErr) return '<div class="card"><div class="empty">N\u00e3o consegui carregar o cat\u00e1logo do mercado.<br><span class="muted">' + U.esc(BF._marketErr) + '</span></div></div>';
+      return '<div class="card"><div class="empty">Carregando cat\u00e1logo de jogadores da base\u2026 \u23f3</div></div>';
+    }
+    const cat = BF.data.MARKET;
+    BF._marketFilter = BF._marketFilter || { pos: '', search: '', ovrMin: 0, ageMin: 16, ageMax: 40 };
     const f = BF._marketFilter;
     const filterClub = BF._marketClub || 0;
     const posList = ['', 'GOL', 'ZAG', 'LAT', 'VOL', 'MEI', 'ATA'];
-    const posOpts = posList.map(function (p) {
-      return '<option value="' + p + '"' + (f.pos === p ? ' selected' : '') + '>' + (p || 'Todas posições') + '</option>';
-    }).join('');
-    // v10.6: filtro de liga (Serie A / Serie B / Todas)
-    const divOpts = [
-      '<option value="0"' + (f.div === 0 ? ' selected' : '') + '>Todas as ligas</option>',
-      '<option value="1"' + (f.div === 1 ? ' selected' : '') + '>Brasileirão Série A</option>',
-      '<option value="2"' + (f.div === 2 ? ' selected' : '') + '>Brasileirão Série B</option>'
-    ].join('');
+    const posOpts = posList.map(function (p) { return '<option value="' + p + '"' + (f.pos === p ? ' selected' : '') + '>' + (p || 'Todas posi\u00e7\u00f5es') + '</option>'; }).join('');
+    const clubOpts = marketClubOptions(me);
     const searchVal = (f.search || '').toLowerCase();
-    let targets = s.players.filter(function (p) { return p.clubId !== me.id; });
-    if (f.div) {
-      targets = targets.filter(function (p) {
-        const c = C.clubById(s, p.clubId);
-        return c && c.division === f.div;
-      });
-    }
+
+    let targets = cat.players.slice();
     if (filterClub) targets = targets.filter(function (p) { return p.clubId === filterClub; });
+    else targets = targets.filter(function (p) { return p.clubId !== me.id; });
     if (f.pos) targets = targets.filter(function (p) { return p.pos === f.pos; });
     if (f.ovrMin > 0) targets = targets.filter(function (p) { return p.ovr >= f.ovrMin; });
     if (f.ageMin > 16) targets = targets.filter(function (p) { return p.age >= f.ageMin; });
@@ -776,48 +800,77 @@ BF.ui = BF.ui || {};
 
     const filterBarHtml = (
       '<div class="market-filters" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0">' +
-        '<div><label class="tiny muted">Buscar nome</label><input id="mfSearch" type="text" placeholder="ex: Neymar" value="' + U.esc(f.search) + '" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit"></div>' +
-        '<div><label class="tiny muted">Posição</label><select id="mfPos" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + posOpts + '</select></div>' +
-        '<div><label class="tiny muted">Liga</label><select id="mfDiv" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + divOpts + '</select></div>' +
+        '<div><label class="tiny muted">Buscar nome</label><input id="mfSearch" type="text" placeholder="ex: Messi" value="' + U.esc(f.search) + '" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit"></div>' +
+        '<div><label class="tiny muted">Posi\u00e7\u00e3o</label><select id="mfPos" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + posOpts + '</select></div>' +
         '<div><label class="tiny muted">Clube</label><select id="mfClub" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border, #2a2a2a);background:var(--bg-soft, #181818);color:inherit">' + clubOpts + '</select></div>' +
-        '<div><label class="tiny muted">OVR mínimo: <b id="mfOvrLbl">' + (f.ovrMin || 0) + '</b></label><input id="mfOvr" type="range" min="0" max="99" value="' + (f.ovrMin || 0) + '" style="width:100%"></div>' +
+        '<div><label class="tiny muted">OVR m\u00ednimo: <b id="mfOvrLbl">' + (f.ovrMin || 0) + '</b></label><input id="mfOvr" type="range" min="0" max="99" value="' + (f.ovrMin || 0) + '" style="width:100%"></div>' +
         '<div><label class="tiny muted">Idade min: <b id="mfAgeMinLbl">' + (f.ageMin || 16) + '</b></label><input id="mfAgeMin" type="range" min="16" max="40" value="' + (f.ageMin || 16) + '" style="width:100%"></div>' +
         '<div><label class="tiny muted">Idade max: <b id="mfAgeMaxLbl">' + (f.ageMax || 40) + '</b></label><input id="mfAgeMax" type="range" min="16" max="40" value="' + (f.ageMax || 40) + '" style="width:100%"></div>' +
         '<div style="display:flex;align-items:flex-end"><button class="btn sm" id="mfClear">Limpar filtros</button></div>' +
-      '</div>' +
-      '<p class="tiny muted" style="margin:-4px 0 8px">Mostrando ' + targets.length + ' de ' + totalMatches + ' jogadores que batem com os filtros.</p>'
+      '</div>'
     );
 
-    // Lista de transferência: jogadores marcados como negociáveis em qualquer outro clube
-    const listedAll = s.players.filter(function (p) { return p.listed && p.clubId !== me.id; })
-      .sort(function (a, b) { return b.ovr - a.ovr; }).slice(0, 30);
-    const listedHtml = listedAll.length ? (
-      '<div class="card listed-box"><div class="row-between"><h2 style="margin:0">\ud83d\udccb Lista de transferência</h2><span class="muted">Jogadores marcados como "Negociar" \u2014 os clubes tendem a aceitar propostas mais facilmente.</span></div>' +
+    return '<div class="card"><div class="row-between"><h2 style="margin:0">\ud83d\udd01 Mercado \u2014 todos os clubes e jogadores da base</h2></div>' +
+      '<p class="muted" style="margin-bottom:6px">Procure refor\u00e7os em <b>qualquer liga do mundo</b> (Brasil, Jap\u00e3o e por a\u00ed vai). Os clubes aparecem com prefer\u00eancia para a sua liga e depois em ordem alfab\u00e9tica.</p>' +
+      filterBarHtml +
       '<div class="tbl-wrap"><table><thead><tr><th>Jogador</th><th class="c">Pos</th><th class="c">OVR</th><th class="c">Idade</th><th>Clube</th><th class="c">Valor</th><th></th></tr></thead><tbody>' +
-      listedAll.map(function (p) {
-        const c = C.clubById(s, p.clubId);
-        return '<tr><td>' + U.esc(p.name) + '<span class="listed-pill">NEG</span></td><td class="c">' + U.ptag(p.pos) + '</td><td class="c"><span class="ovr ' + U.ovrClass(p.ovr) + '">' + p.ovr + '</span></td><td class="c">' + p.age + '</td><td><div class="club-cell">' + U.badge(c) + '<span style="font-size:12px">' + c.short + '</span></div></td><td class="c">' + U.fmtM(p.value) + '</td><td class="c"><button class="btn sm primary offerBtn" data-id="' + p.id + '">Proposta</button></td></tr>';
-      }).join('') + '</tbody></table></div></div>'
-    ) : '';
+      targets.map(function (p) {
+        return '<tr><td>' + U.esc(p.name) + '</td><td class="c">' + U.ptag(p.pos) + '</td><td class="c"><span class="ovr ' + U.ovrClass(p.ovr) + '">' + p.ovr + '</span></td><td class="c">' + p.age + '</td><td><span style="font-size:12px">' + U.esc(p.clubShort || p.clubName || '') + '</span> <span class="muted" style="font-size:11px">' + U.esc(p.country || '') + '</span></td><td class="c">' + U.fmtM(p.value) + '</td><td class="c"><button class="btn sm primary offerCatBtn" data-pid="' + p.pid + '">Proposta</button></td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p class="tiny muted" style="margin-top:8px">Mostrando ' + targets.length + ' de ' + totalMatches + ' jogadores que batem com os filtros.</p></div>';
+  }
 
-    return '<div class="stat-row">' +
-      stat('Caixa disponível', U.fmtM(me.budget), me.budget < 0 ? 'neg' : 'money') +
+  function viewMarket() {
+    const s = S(); const me = myClub();
+    if (!me || !hasClub() || isFired()) return isFired() ? firedBanner() : '<div class="card"><div class="empty">Escolha um clube na aba Party para negociar.</div></div>';
+
+    const sub = BF._marketSub || 'recv';
+    const inbox = myNegotiations().filter(needsMyAction);
+    const active = myNegotiations().filter(function (n) { return ['pending', 'counter'].indexOf(n.status) >= 0 && !needsMyAction(n); });
+    const closed = myNegotiations().filter(function (n) { return ['accepted', 'rejected', 'withdrawn'].indexOf(n.status) >= 0; }).slice(0, 12);
+    const listedAll = s.players.filter(function (p) { return p.listed && p.clubId !== me.id; }).sort(function (a, b) { return b.ovr - a.ovr; }).slice(0, 40);
+
+    const tabsDef = [
+      { k: 'recv', label: '\ud83d\udce5 Propostas recebidas', badge: inbox.length },
+      { k: 'list', label: '\ud83d\udccb Lista de transfer\u00eancia', badge: listedAll.length },
+      { k: 'market', label: '\ud83d\udd01 Mercado', badge: 0 },
+      { k: 'hist', label: '\ud83d\udcc4 Hist\u00f3rico de Negocia\u00e7\u00f5es', badge: 0 }
+    ];
+    const subbar = '<div class="market-tabs">' + tabsDef.map(function (t) {
+      return '<button class="market-subtab ' + (sub === t.k ? 'active' : '') + '" data-sub="' + t.k + '">' + t.label + (t.badge ? ' <span class="pill">' + t.badge + '</span>' : '') + '</button>';
+    }).join('') + '</div>';
+
+    const statRow = '<div class="stat-row">' +
+      stat('Caixa dispon\u00edvel', U.fmtM(me.budget), me.budget < 0 ? 'neg' : 'money') +
       stat('Elenco', C.squad(s, me.id).length) +
       stat('Propostas p/ decidir', inbox.length, inbox.length ? 'neg' : '') +
-      stat('Listados (mercado)', listedAll.length, listedAll.length ? 'money' : '') +
-      '</div>' +
-      (inbox.length ? '<div class="card"><h2>\ud83d\udce5 Aguardando sua decisão</h2><div class="neg-grid">' + groupNegByPlayer(inbox).map(negGroupCard).join('') + '</div></div>' : '') +
-      (active.length ? '<div class="card"><h2>\u23f3 Negociações em andamento</h2><div class="neg-grid">' + groupNegByPlayer(active).map(negGroupCard).join('') + '</div></div>' : '') +
-      listedHtml +
-      '<div class="card"><div class="row-between"><h2 style="margin:0">\ud83d\udd01 Mercado \u2014 contratar jogadores</h2></div>' +
-        '<p class="muted" style="margin-bottom:6px">Escolha um jogador (de qualquer divisão) e envie uma proposta. Use os filtros para encontrar reforços por posição, clube, OVR e idade.</p>' +
-        filterBarHtml +
+      stat('Em andamento', active.length, active.length ? 'money' : '') +
+      '</div>';
+
+    let body = '';
+    if (sub === 'recv') {
+      body = inbox.length
+        ? '<div class="card"><h2>\ud83d\udce5 Aguardando sua decis\u00e3o</h2><div class="neg-grid">' + groupNegByPlayer(inbox).map(negGroupCard).join('') + '</div></div>'
+        : '<div class="card"><div class="empty">Nenhuma proposta aguardando sua decis\u00e3o.</div></div>';
+    } else if (sub === 'list') {
+      body = listedAll.length ? (
+        '<div class="card listed-box"><div class="row-between"><h2 style="margin:0">\ud83d\udccb Lista de transfer\u00eancia</h2><span class="muted">Jogadores marcados como "Negociar" \u2014 os clubes tendem a aceitar propostas mais facilmente.</span></div>' +
         '<div class="tbl-wrap"><table><thead><tr><th>Jogador</th><th class="c">Pos</th><th class="c">OVR</th><th class="c">Idade</th><th>Clube</th><th class="c">Valor</th><th></th></tr></thead><tbody>' +
-        targets.map(function (p) {
+        listedAll.map(function (p) {
           const c = C.clubById(s, p.clubId);
-          return '<tr><td>' + U.esc(p.name) + '</td><td class="c">' + U.ptag(p.pos) + '</td><td class="c"><span class="ovr ' + U.ovrClass(p.ovr) + '">' + p.ovr + '</span></td><td class="c">' + p.age + '</td><td><div class="club-cell">' + U.badge(c) + '<span style="font-size:12px">' + c.short + '</span></div></td><td class="c">' + U.fmtM(p.value) + '</td><td class="c"><button class="btn sm primary offerBtn" data-id="' + p.id + '">Proposta</button></td></tr>';
-        }).join('') + '</tbody></table></div></div>' +
-      (closed.length ? '<div class="card"><h2>\ud83d\udcc4 Histórico de negociações</h2><div class="neg-grid">' + closed.map(negCard).join('') + '</div></div>' : '');
+          return '<tr><td>' + U.esc(p.name) + '<span class="listed-pill">NEG</span></td><td class="c">' + U.ptag(p.pos) + '</td><td class="c"><span class="ovr ' + U.ovrClass(p.ovr) + '">' + p.ovr + '</span></td><td class="c">' + p.age + '</td><td><div class="club-cell">' + U.badge(c) + '<span style="font-size:12px">' + (c ? c.short : '') + '</span></div></td><td class="c">' + U.fmtM(p.value) + '</td><td class="c"><button class="btn sm primary offerBtn" data-id="' + p.id + '">Proposta</button></td></tr>';
+        }).join('') + '</tbody></table></div></div>'
+      ) : '<div class="card"><div class="empty">Nenhum jogador na lista de transfer\u00eancia no momento.</div></div>';
+    } else if (sub === 'market') {
+      body = marketBody(s, me);
+    } else {
+      body =
+        (active.length ? '<div class="card"><h2>\u23f3 Negocia\u00e7\u00f5es em andamento</h2><div class="neg-grid">' + groupNegByPlayer(active).map(negGroupCard).join('') + '</div></div>' : '') +
+        (closed.length ? '<div class="card"><h2>\ud83d\udcc4 Hist\u00f3rico de negocia\u00e7\u00f5es</h2><div class="neg-grid">' + closed.map(negCard).join('') + '</div></div>' : '') +
+        (!active.length && !closed.length ? '<div class="card"><div class="empty">Voc\u00ea ainda n\u00e3o fez negocia\u00e7\u00f5es.</div></div>' : '');
+    }
+
+    return statRow + '<div class="card" style="padding:10px">' + subbar + '</div>' + body;
   }
 
   // -------- PARTY --------
@@ -834,7 +887,11 @@ BF.ui = BF.ui || {};
         '<p class="muted">Você é <b>' + (mode === 'host' ? 'o anfitrião' : 'convidado') + '</b>. Compartilhe o código; cada jogador assume um clube abaixo.</p>';
     }
     const memHtml = members.map(function (m) { return '<span class="member">' + (m.host ? '\ud83d\udc51 ' : '') + U.esc(m.name) + '</span>'; }).join('');
-    const div = BF._partyDiv || 1; BF._partyDiv = div;
+    // Escolhe uma divisao que tenha clubes (evita a tela "apagada"/vazia quando
+    // a regiao so tem uma divisao ou o mundo ainda nao terminou de carregar).
+    let div = BF._partyDiv || 1;
+    if (!C.divClubs(s, div).length) { div = C.divClubs(s, 1).length ? 1 : (C.divClubs(s, 2).length ? 2 : div); }
+    BF._partyDiv = div;
     const grid = C.divClubs(s, div).map(function (c) {
       const owner = controlled[c.id];
       const mineFlag = c.id === myId();
@@ -844,7 +901,7 @@ BF.ui = BF.ui || {};
         '</div>';
     }).join('');
     return '<div class="card"><h2>\ud83d\udc65 Party</h2>' + info + '<div class="members">' + memHtml + '</div></div>' +
-      '<div class="card"><div class="row-between"><h2 style="margin:0">\u26bd Escolha seu clube</h2>' + divSwitch('partyDiv', div) + '</div><div class="club-pick">' + grid + '</div></div>';
+      '<div class="card"><div class="row-between"><h2 style="margin:0">\u26bd Escolha seu clube</h2>' + divSwitch('partyDiv', div) + '</div><div class="club-pick">' + (grid || '<div class="empty">Carregando clubes da liga\u2026 \u23f3</div>') + '</div></div>';
   }
 
   // ---------- RENDER ----------
@@ -896,6 +953,8 @@ BF.ui = BF.ui || {};
     });
 
     document.querySelectorAll('.offerBtn').forEach(function (b) { b.onclick = function () { openOffer(+b.dataset.id); }; });
+    document.querySelectorAll('.offerCatBtn').forEach(function (b) { b.onclick = function () { openCatalogOffer(+b.dataset.pid); }; });
+    document.querySelectorAll('.market-subtab').forEach(function (b) { b.onclick = function () { BF._marketSub = b.dataset.sub; U.render(); }; });
     document.querySelectorAll('.negAct').forEach(function (b) { b.onclick = function () { respond(+b.dataset.neg, b.dataset.side, b.dataset.dec); }; });
     document.querySelectorAll('.claimBtn').forEach(function (b) { b.onclick = function () { BF.claimClub(+b.dataset.id); U.setTab('home'); }; });
     document.querySelectorAll('.releaseBtn').forEach(function (b) { b.onclick = function () { BF.dispatch({ type: 'RELEASE_CLUB', clubId: +b.dataset.id }); BF.me.clubId = null; U.render(); }; });
@@ -1076,22 +1135,63 @@ BF.ui = BF.ui || {};
       U.flash(last && last.msg ? last.msg : 'Proposta enviada', last && !last.ok);
     };
   }
-  function openOffer(playerId) {
-    const s = S(); const p = s.players.find(function (x) { return x.id === playerId; });
-    if (!p) return; const c = C.clubById(s, p.clubId);
+  // Modal generico de proposta. Recebe um jogador (shape do motor), seu clube e,
+  // opcionalmente, dados de injecao (quando o jogador vem do CATALOGO do mercado
+  // e ainda nao existe no estado do jogo).
+  function openOfferObj(p, club, inject) {
     const ov = modal('<h1>Proposta por ' + U.esc(p.name) + '</h1>' +
-      '<p class="sub">' + U.ptag(p.pos) + ' OVR ' + p.ovr + ' \u2022 ' + c.name + ' \u2022 valor de mercado <b>' + U.fmtM(p.value) + '</b></p>' +
-      '<label class="fld">Sua oferta (em milhões R$)<input type="number" id="offerVal" step="0.5" min="0" value="' + p.value.toFixed(1) + '"></label>' +
+      '<p class="sub">' + U.ptag(p.pos) + ' OVR ' + p.ovr + ' \u2022 ' + (club ? U.esc(club.name) : '') + ' \u2022 valor de mercado <b>' + U.fmtM(p.value) + '</b></p>' +
+      '<label class="fld">Sua oferta (em milh\u00f5es R$)<input type="number" id="offerVal" step="0.5" min="0" value="' + p.value.toFixed(1) + '"></label>' +
       '<div class="md-actions"><button class="btn" id="offerCancel">Cancelar</button><button class="btn primary" id="offerSend">Enviar proposta</button></div>');
     ov.querySelector('#offerCancel').onclick = function () { document.body.removeChild(ov); };
     ov.querySelector('#offerSend').onclick = function () {
       const amt = parseFloat(ov.querySelector('#offerVal').value);
-      if (!(amt > 0)) { U.flash('Valor inválido', true); return; }
+      if (!(amt > 0)) { U.flash('Valor inv\u00e1lido', true); return; }
       document.body.removeChild(ov);
-      BF.dispatch({ type: 'OFFER_CREATE', fromClubId: myId(), playerId: playerId, amount: amt });
+      const action = { type: 'OFFER_CREATE', fromClubId: myId(), playerId: p.id, amount: amt };
+      if (inject) { action.playerData = inject.playerData; action.clubData = inject.clubData; }
+      BF.dispatch(action);
       U.flash('Proposta enviada!');
     };
   }
+
+  // Proposta por um jogador que JA existe no estado (lista de transferencia etc.).
+  function openOffer(playerId) {
+    const s = S(); const p = s.players.find(function (x) { return x.id === playerId; });
+    if (!p) return; const c = C.clubById(s, p.clubId);
+    openOfferObj(p, c, null);
+  }
+
+  // Proposta por um jogador do CATALOGO do mercado (qualquer liga do mundo).
+  // Se o clube ja estiver carregado no mundo atual, negocia o jogador existente;
+  // caso contrario, injeta clube + jogador (carregados na acao para todos os peers).
+  function openCatalogOffer(pid) {
+    const cat = BF.data.MARKET; if (!cat) return;
+    const prof = cat.players.find(function (p) { return p.pid === pid; }); if (!prof) return;
+    const s = S();
+    const engId = 2000000000 + pid;
+    let existing = s.players.find(function (p) { return p.id === engId; });
+    if (!existing) {
+      const worldClub = C.clubById(s, prof.clubId);
+      if (worldClub && C.squad(s, prof.clubId).length) {
+        existing = s.players.find(function (p) { return p.clubId === prof.clubId && p.name === prof.name && p.pos === prof.pos; });
+      }
+    }
+    if (existing) { openOfferObj(existing, C.clubById(s, existing.clubId), null); return; }
+    const cc = cat.clubById[prof.clubId] || {};
+    const engineClub = {
+      id: prof.clubId, name: cc.name || prof.clubName || 'Clube', short: cc.short || prof.clubShort || 'CLB',
+      color: cc.color || '#888', city: cc.country || prof.country || '', leagueId: String(cc.leagueId || prof.leagueId || ''),
+      region: cc.country || prof.country || '', division: 0, continental: true,
+      strength: cc.strength || prof.ovr, budget: (typeof cc.budget === 'number') ? cc.budget : 40
+    };
+    const enginePlayer = {
+      id: engId, clubId: prof.clubId, name: prof.name, pos: prof.pos, ovr: prof.ovr, age: prof.age,
+      value: prof.value, salary: prof.salary, pot: prof.pot || prof.ovr, contract: 24, listed: false, goals: 0, energy: 100
+    };
+    openOfferObj(enginePlayer, engineClub, { playerData: enginePlayer, clubData: engineClub });
+  }
+
   function openCounter(negId, side) {
     const n = S().negotiations.find(function (x) { return x.id === negId; }); if (!n) return;
     const ov = modal('<h1>Contraproposta</h1><p class="sub">' + U.esc(n.playerName) + ' \u2022 valor atual <b>' + n.amount.toFixed(1) + ' mi</b></p>' +
